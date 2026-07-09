@@ -1,3 +1,13 @@
 <resources>
     <string name="app_name">ControleObras</string>
+    <string name="home_placeholder">Gestão de obras e controlo de despesas.</string>
+    <string name="home_novo_talao">Novo talão</string>
+    <string name="home_historico">Histórico</string>
+    <string name="home_instrucao">Toca em "Novo talão" para fotografar ou escolher uma fatura, ou consulta o "Histórico" dos talões já guardados.</string>
+    <string name="boasvindas_titulo">Como funciona a app</string>
+    <string name="boasvindas_passo1">1. Toca em "Novo talão" e fotografa ou escolhe uma fatura da galeria.</string>
+    <string name="boasvindas_passo2">2. A app lê o texto automaticamente (OCR) e tenta preencher os campos.</string>
+    <string name="boasvindas_passo3">3. Confirma ou corrige os dados antes de guardar — campos não identificados ficam em branco para preencheres.</string>
+    <string name="boasvindas_passo4">4. No Histórico consultas os talões guardados e exportas em XML ou CSV a qualquer momento.</string>
+    <string name="boasvindas_entendido">Entendido</string>
 </resources>

@@ -1,4 +1,4 @@
-package pt.controleobras.app.ui.theme
+package pt.controleobras.app.core.designsystem.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
