@@ -24,19 +24,25 @@ class HeuristicReceiptParser @Inject constructor() : ReceiptParser {
 
     override fun parse(textoReconhecido: String, imagemPath: String): TalaoDraft {
         val linhas = textoReconhecido.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val nifFornecedor = extrairNif(textoReconhecido, linhas)
+        val numeroFatura  = extrairNumeroFatura(textoReconhecido, linhas)
 
         return TalaoDraft(
-            empresa      = extrairEmpresa(linhas),
-            nif          = extrairNif(textoReconhecido, linhas),
-            morada       = extrairMorada(linhas),
-            data         = extrairData(textoReconhecido, linhas),
-            hora         = extrairHora(textoReconhecido, linhas),
-            numeroFatura = extrairNumeroFatura(textoReconhecido, linhas),
-            itens        = extrairItens(linhas),
-            iva          = extrairIva(textoReconhecido, linhas),
-            total        = extrairTotal(textoReconhecido, linhas),
-            observacoes  = extrairObservacoes(linhas),
-            imagemPath   = imagemPath,
+            empresa         = extrairEmpresa(linhas),
+            nif             = nifFornecedor,
+            nifCliente      = extrairNifCliente(textoReconhecido, nifFornecedor),
+            morada          = extrairMorada(linhas),
+            serie           = extrairSerie(numeroFatura, textoReconhecido),
+            numeroFatura    = numeroFatura,
+            data            = extrairData(textoReconhecido, linhas),
+            dataVencimento  = extrairDataVencimento(textoReconhecido, linhas),
+            hora            = extrairHora(textoReconhecido, linhas),
+            metodoPagamento = extrairMetodoPagamento(textoReconhecido, linhas),
+            itens           = extrairItens(linhas),
+            iva             = extrairIva(textoReconhecido, linhas),
+            total           = extrairTotal(textoReconhecido, linhas),
+            observacoes     = extrairObservacoes(linhas),
+            imagemPath      = imagemPath,
             textoReconhecido = textoReconhecido
         )
     }
@@ -84,21 +90,38 @@ class HeuristicReceiptParser @Inject constructor() : ReceiptParser {
     }
 
     // ───────────────────────────────────────────────────────────────────────────
-    // NIF
+    // NIF FORNECEDOR
     // ───────────────────────────────────────────────────────────────────────────
 
     private fun extrairNif(texto: String, linhas: List<String>): String {
-        // L1: rótulo explícito (NIF, NIPC, Contribuinte, NIF/Contribuinte, NUIT)
+        // L1: rótulo explícito do emitente (NIF, NIPC, Contribuinte)
         NIF_COM_ROTULO_REGEX.find(texto)?.groupValues?.getOrNull(1)
             ?.let { if (nifValido(it)) return it }
 
-        // L2: número de 9 dígitos válido por checksum
+        // L2: primeiro NIF de 9 dígitos válido por checksum
         NIF_ISOLADO_REGEX.findAll(texto)
             .map { it.value }
             .firstOrNull { nifValido(it) }
             ?.let { return it }
 
         return ""
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // NIF CLIENTE
+    // ───────────────────────────────────────────────────────────────────────────
+
+    private fun extrairNifCliente(texto: String, nifFornecedor: String): String {
+        // L1: rótulo explícito do cliente/adquirente
+        NIF_CLIENTE_ROTULO_REGEX.find(texto)?.groupValues?.getOrNull(1)
+            ?.let { if (nifValido(it)) return it }
+
+        // L2: segundo NIF válido diferente do fornecedor
+        val todos = NIF_ISOLADO_REGEX.findAll(texto)
+            .map { it.value }
+            .filter { nifValido(it) && it != nifFornecedor }
+            .toList()
+        return todos.firstOrNull().orEmpty()
     }
 
     private fun nifValido(nif: String): Boolean {
@@ -315,6 +338,70 @@ class HeuristicReceiptParser @Inject constructor() : ReceiptParser {
     }
 
     // ───────────────────────────────────────────────────────────────────────────
+    // SÉRIE
+    // ───────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Extrai a série do documento a partir do número de fatura.
+     * Ex: "FT A/1234" → "A", "FT 2024A/1" → "2024A", "FS B/0021" → "B"
+     * Fallback: procura padrão série explícito no texto ("SÉRIE: A").
+     */
+    private fun extrairSerie(numeroFatura: String, texto: String): String {
+        // Extrair da parte entre o tipo de doc e o '/' (ex: "FT A/1234" → "A")
+        SERIE_DE_NUMERO_FATURA_REGEX.find(numeroFatura)
+            ?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // Rótulo explícito "SÉRIE:" ou "SERIE:"
+        SERIE_ROTULO_REGEX.find(texto)
+            ?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotBlank() }?.let { return it }
+
+        return ""
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // DATA DE VENCIMENTO
+    // ───────────────────────────────────────────────────────────────────────────
+
+    private fun extrairDataVencimento(texto: String, linhas: List<String>): LocalDate? {
+        // L1: linha com rótulo VENCIMENTO / PRAZO DE PAGAMENTO / DATA LIMITE
+        for (linha in linhas) {
+            if (!ROTULO_VENCIMENTO_REGEX.containsMatchIn(linha)) continue
+            parsarData(linha)?.let { return it }
+            // data pode estar na linha seguinte
+            val idx = linhas.indexOf(linha)
+            if (idx + 1 < linhas.size) parsarData(linhas[idx + 1])?.let { return it }
+        }
+        return null
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    // MÉTODO DE PAGAMENTO
+    // ───────────────────────────────────────────────────────────────────────────
+
+    private fun extrairMetodoPagamento(texto: String, linhas: List<String>): String {
+        // L1: rótulo "FORMA DE PAGAMENTO:", "PAGAMENTO:", "MEIO DE PAGAMENTO:"
+        ROTULO_METODO_PAGAMENTO_REGEX.find(texto)
+            ?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // L2: palavras-chave de meios de pagamento no texto
+        val textoUp = texto.uppercase()
+        return when {
+            "MB WAY" in textoUp || "MBWAY" in textoUp              -> "MB Way"
+            "MULTIBANCO" in textoUp || " ATM" in textoUp           -> "Multibanco"
+            "TRANSFERÊNCIA" in textoUp || "TRANSFERENCIA" in textoUp -> "Transferência"
+            "VISA" in textoUp && "NUMERÁRIO" !in textoUp           -> "Visa"
+            "MASTERCARD" in textoUp                                 -> "Mastercard"
+            "NUMERÁRIO" in textoUp || "NUMERARIO" in textoUp       -> "Numerário"
+            "DINHEIRO" in textoUp                                   -> "Numerário"
+            "CHEQUE" in textoUp                                     -> "Cheque"
+            else                                                    -> ""
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
     // OBSERVAÇÕES
     // ───────────────────────────────────────────────────────────────────────────
 
@@ -372,6 +459,9 @@ class HeuristicReceiptParser @Inject constructor() : ReceiptParser {
         // NIF
         val NIF_COM_ROTULO_REGEX = Regex(
             """(?i)(?:NIF|NIPC|Contribuinte|N\.?I\.?F\.?|N\.?I\.?P\.?C\.?)[:\s/]*(\d{9})"""
+        )
+        val NIF_CLIENTE_ROTULO_REGEX = Regex(
+            """(?i)(?:NIF\s*(?:DO\s*)?CLIENTE|CLIENTE[:\s]+NIF|ADQUIRENTE[:\s]+NIF|COMPRADOR[:\s]+NIF|NIF\s*ADQUIRENTE|NIF\s*COMPRADOR|A/C\s*NIF)[:\s/]*(\d{9})"""
         )
         val NIF_ISOLADO_REGEX = Regex("""\b\d{9}\b""")
 
@@ -435,6 +525,24 @@ class HeuristicReceiptParser @Inject constructor() : ReceiptParser {
         )
         val INICIO_PRODUTOS_REGEX  = Regex("""(?i)\b(ARTIGO|PRODUTO|DESCRIÇÃO|ITEM|CÓDIGO)\b""")
         val INICIO_RODAPE_REGEX    = Regex("""(?i)\b(SUBTOTAL|TOTAL|DESCONTO|IVA\s*\d|TROCO|PAGO)\b""")
+
+        // Série
+        val SERIE_DE_NUMERO_FATURA_REGEX = Regex(
+            """(?i)(?:FT|FS|FR|FA|FD|GT|NC|ND|TD|DC|RP|RE|CS|LD|RA)\s+([A-Z0-9]+)/"""
+        )
+        val SERIE_ROTULO_REGEX = Regex(
+            """(?i)S[ÉE]RIE[:\s]+([A-Z0-9]{1,10})"""
+        )
+
+        // Data de vencimento
+        val ROTULO_VENCIMENTO_REGEX = Regex(
+            """(?i)\b(?:VENCIMENTO|PRAZO\s*DE\s*PAGAMENTO|DATA\s*LIMITE|DATA\s*VENC\.?|VENC\.?)[:\s]"""
+        )
+
+        // Método de pagamento
+        val ROTULO_METODO_PAGAMENTO_REGEX = Regex(
+            """(?i)(?:FORMA\s*DE\s*PAGAMENTO|MEIO\s*DE\s*PAGAMENTO|PAGAMENTO|MODO\s*DE\s*PAGAMENTO)[:\s]+([^\n;]{3,30})"""
+        )
 
         // Observações
         val ROTULO_OBS_REGEX = Regex(

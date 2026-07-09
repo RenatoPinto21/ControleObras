@@ -18,6 +18,7 @@ mlkitTextRecognition = "16.0.1"
 kotlinxSerializationJson = "1.11.0"
 mlkitBarcodeScanning = "17.3.0"
 playServicesLocation = "21.3.0"
+mediapipeTasks = "0.10.27"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -51,6 +52,7 @@ mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition"
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasks" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

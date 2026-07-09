@@ -1,0 +1,120 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "8c3153939d7946f4c63c976a74a9ce89",
+    "entities": [
+      {
+        "tableName": "talao",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `empresa` TEXT NOT NULL, `nif` TEXT, `nifCliente` TEXT, `morada` TEXT, `data` TEXT, `hora` TEXT, `serie` TEXT, `numeroFatura` TEXT, `dataVencimento` TEXT, `metodoPagamento` TEXT, `itens` TEXT NOT NULL, `iva` TEXT, `total` TEXT, `observacoes` TEXT, `imagemPath` TEXT NOT NULL, `criadoEm` TEXT NOT NULL, `textoOcr` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "empresa",
+            "columnName": "empresa",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nif",
+            "columnName": "nif",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nifCliente",
+            "columnName": "nifCliente",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "morada",
+            "columnName": "morada",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "data",
+            "columnName": "data",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hora",
+            "columnName": "hora",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serie",
+            "columnName": "serie",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "numeroFatura",
+            "columnName": "numeroFatura",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dataVencimento",
+            "columnName": "dataVencimento",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "metodoPagamento",
+            "columnName": "metodoPagamento",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "itens",
+            "columnName": "itens",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "iva",
+            "columnName": "iva",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "total",
+            "columnName": "total",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "observacoes",
+            "columnName": "observacoes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "imagemPath",
+            "columnName": "imagemPath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "criadoEm",
+            "columnName": "criadoEm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "textoOcr",
+            "columnName": "textoOcr",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '8c3153939d7946f4c63c976a74a9ce89')"
+    ]
+  }
+}

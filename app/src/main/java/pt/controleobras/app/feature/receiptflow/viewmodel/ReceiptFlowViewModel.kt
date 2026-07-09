@@ -14,8 +14,12 @@ import kotlinx.coroutines.launch
 import pt.controleobras.app.core.device.DeviceInfo
 import pt.controleobras.app.core.drive.DriveUploader
 import pt.controleobras.app.core.export.CapturaCsvExporter
+import pt.controleobras.app.core.llm.LlmExtractionResult
+import pt.controleobras.app.core.llm.LlmExtractor
+import pt.controleobras.app.core.llm.LlmItemResult
 import pt.controleobras.app.core.location.LocationProvider
 import pt.controleobras.app.core.model.CaptureMetadata
+import pt.controleobras.app.core.model.ItemTalaoDraft
 import pt.controleobras.app.core.model.TalaoDraft
 import pt.controleobras.app.core.model.WorkerFormData
 import pt.controleobras.app.core.model.paraDominio
@@ -26,6 +30,9 @@ import pt.controleobras.app.core.qr.AtQrData
 import pt.controleobras.app.core.qr.QrCodeReader
 import pt.controleobras.app.data.repository.TalaoRepository
 import java.io.File
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 /**
@@ -33,10 +40,16 @@ import javax.inject.Inject
  *
  *   WorkerForm → Câmara → [foto]
  *     → OCR + QR (paralelo) + GPS + MAC + IDREG
+ *     → LLM (Gemma 3 1B, se instalado) ou HeuristicParser (fallback)
  *     → renomeia imagem para {MAC}_{IDREG}.jpg
  *     → gera CSV {MAC}_{IDREG}.csv
  *     → envia ambos para Google Drive (background)
  *     → ecrã de revisão com dados extraídos
+ *
+ * Hierarquia de extração (da mais fiável para a menos):
+ *   1. QR code AT  (Portaria 195/2020 — dados inseridos pelo emitente)
+ *   2. LLM Gemma   (compreensão semântica do texto OCR)
+ *   3. Heurístico  (regex — sempre disponível, sem dependências)
  *
  * Partilhado entre os ecrãs de formulário, captura e revisão via grafo aninhado.
  */
@@ -46,6 +59,7 @@ class ReceiptFlowViewModel @Inject constructor(
     private val qrCodeReader: QrCodeReader,
     private val receiptParser: ReceiptParser,
     private val atQrCodeParser: AtQrCodeParser,
+    private val llmExtractor: LlmExtractor,
     private val locationProvider: LocationProvider,
     private val deviceInfo: DeviceInfo,
     private val capturaCsvExporter: CapturaCsvExporter,
@@ -69,11 +83,18 @@ class ReceiptFlowViewModel @Inject constructor(
     // -----------------------------------------------------------------------
 
     fun processarImagem(context: Context, imagemUri: Uri, imagemPath: String) {
-        _uiState.update { it.copy(isProcessing = true, errorMessage = null, qrDetectado = false) }
+        _uiState.update {
+            it.copy(
+                isProcessing = true,
+                statusProcessamento = "A ler imagem (OCR)...",
+                errorMessage = null,
+                qrDetectado = false
+            )
+        }
 
         viewModelScope.launch {
             runCatching {
-                // 1. Lançar OCR, QR e GPS em paralelo
+                // 1. OCR, QR e GPS em paralelo — maximiza aproveitamento do tempo
                 val textoDeferred = async { textRecognizer.recognizeText(context, imagemUri) }
                 val qrDeferred = async {
                     runCatching { qrCodeReader.readQrCode(context, imagemUri) }.getOrNull()
@@ -84,7 +105,7 @@ class ReceiptFlowViewModel @Inject constructor(
                 val qrContent = qrDeferred.await()
                 val gps = gpsDeferred.await()
 
-                // 2. Gerar identificadores do registo
+                // 2. Identificadores do registo
                 val mac = deviceInfo.getMacAddress(context)
                 val idReg = deviceInfo.gerarIdReg()
                 val metadata = CaptureMetadata(
@@ -94,30 +115,44 @@ class ReceiptFlowViewModel @Inject constructor(
                     qrCodeRaw = qrContent
                 )
 
-                // 3. Renomear a imagem original para {MAC}_{IDREG}.jpg
+                // 3. Renomear imagem para {MAC}_{IDREG}.jpg
                 val destDir = File(context.filesDir, "receipts").also { it.mkdirs() }
                 val imagemFinal = File(destDir, "${metadata.fileBaseName}.jpg")
                 File(imagemPath).copyTo(imagemFinal, overwrite = true)
 
-                // 4. OCR + QR → draft
+                // 4. Interpretação AT QR code (mais fiável — dados do emitente)
                 val atQrData = qrContent?.let { atQrCodeParser.parse(it) }
-                val draftOcr = receiptParser.parse(texto, imagemFinal.absolutePath)
-                val draft = mergeDraft(draftOcr, atQrData)
 
-                // 5. Gerar CSV de registo
+                // 5. Extração semântica: LLM (se instalado) ou heurístico (fallback)
+                val draftBase = if (llmExtractor.isModelReady()) {
+                    _uiState.update {
+                        it.copy(statusProcessamento = "A analisar com IA (Gemma)...")
+                    }
+                    val llmResult = runCatching { llmExtractor.extract(texto) }.getOrNull()
+                    llmResult?.let { llmResultToDraft(it, imagemFinal.absolutePath, texto) }
+                        ?: receiptParser.parse(texto, imagemFinal.absolutePath)  // fallback
+                } else {
+                    receiptParser.parse(texto, imagemFinal.absolutePath)
+                }
+
+                // 6. Merge com QR (QR tem prioridade para os campos que fornece)
+                val draft = mergeDraft(draftBase, atQrData)
+
+                // 7. Gerar CSV de registo
                 val csvFile = capturaCsvExporter.exportar(
                     destDir = destDir,
                     metadata = metadata,
                     workerData = _uiState.value.workerFormData
                         ?: WorkerFormData("", "", ""),
                     atQrData = atQrData,
-                    fornecedor = draft.empresa
+                    draft = draft
                 )
 
-                // 6. Atualizar estado (navega para revisão)
+                // 8. Atualizar estado (navega para revisão)
                 _uiState.update {
                     it.copy(
                         isProcessing = false,
+                        statusProcessamento = "",
                         draft = draft,
                         captureMetadata = metadata,
                         qrDetectado = atQrData != null,
@@ -125,13 +160,14 @@ class ReceiptFlowViewModel @Inject constructor(
                     )
                 }
 
-                // 7. Upload Drive em background (não bloqueia a UI)
+                // 9. Upload Drive em background (não bloqueia a UI)
                 uploadDrive(context, imagemFinal, csvFile)
 
             }.onFailure { erro ->
                 _uiState.update {
                     it.copy(
                         isProcessing = false,
+                        statusProcessamento = "",
                         errorMessage = erro.message ?: "Falha ao processar a imagem."
                     )
                 }
@@ -145,7 +181,6 @@ class ReceiptFlowViewModel @Inject constructor(
 
     private fun uploadDrive(context: Context, imagem: File, csv: File) {
         if (!driveUploader.isConfigurado(context)) return
-
         viewModelScope.launch {
             _uiState.update { it.copy(driveStatus = DriveStatus.A_ENVIAR) }
             val imagemOk = driveUploader.upload(context, imagem, "image/jpeg")
@@ -157,18 +192,77 @@ class ReceiptFlowViewModel @Inject constructor(
     }
 
     // -----------------------------------------------------------------------
-    // Merge OCR + QR
+    // Merge: QR code AT tem prioridade sobre LLM/heurístico
     // -----------------------------------------------------------------------
 
-    private fun mergeDraft(draftOcr: TalaoDraft, qr: AtQrData?): TalaoDraft {
-        if (qr == null) return draftOcr
-        return draftOcr.copy(
-            nif = qr.nif.ifBlank { draftOcr.nif },
-            data = qr.data ?: draftOcr.data,
-            numeroFatura = qr.numeroFatura?.ifBlank { null } ?: draftOcr.numeroFatura,
-            iva = qr.totalIva?.ifBlank { null } ?: draftOcr.iva,
-            total = qr.totalComIva?.ifBlank { null } ?: draftOcr.total
+    private fun mergeDraft(base: TalaoDraft, qr: AtQrData?): TalaoDraft {
+        if (qr == null) return base
+        return base.copy(
+            nif          = qr.nif.ifBlank { base.nif },
+            data         = qr.data ?: base.data,
+            numeroFatura = qr.numeroFatura?.ifBlank { null } ?: base.numeroFatura,
+            iva          = qr.totalIva?.ifBlank { null } ?: base.iva,
+            total        = qr.totalComIva?.ifBlank { null } ?: base.total
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Conversão LlmExtractionResult → TalaoDraft
+    // -----------------------------------------------------------------------
+
+    private fun llmResultToDraft(
+        result: LlmExtractionResult,
+        imagemPath: String,
+        textoOcr: String
+    ): TalaoDraft = TalaoDraft(
+        empresa         = result.fornecedor.orEmpty(),
+        nif             = result.nifFornecedor.orEmpty(),
+        nifCliente      = result.nifCliente.orEmpty(),
+        morada          = result.morada.orEmpty(),
+        serie           = result.serie.orEmpty(),
+        numeroFatura    = result.numeroFatura.orEmpty(),
+        data            = parsarDataLlm(result.dataEmissao),
+        dataVencimento  = parsarDataLlm(result.dataVencimento),
+        hora            = parsarHoraLlm(result.hora),
+        metodoPagamento = result.metodoPagamento.orEmpty(),
+        total           = result.total?.replace(',', '.').orEmpty(),
+        iva             = result.ivaTotal?.replace(',', '.').orEmpty(),
+        itens           = result.linhas.map { it.toItemTalaoDraft() },
+        observacoes     = result.observacoes.orEmpty(),
+        imagemPath      = imagemPath,
+        textoReconhecido = textoOcr
+    )
+
+    private fun LlmItemResult.toItemTalaoDraft() = ItemTalaoDraft(
+        descricao     = descricao.orEmpty(),
+        quantidade    = quantidade.orEmpty(),
+        precoUnitario = precoUnitario?.replace(',', '.').orEmpty(),
+        desconto      = desconto?.replace(',', '.').orEmpty(),
+        taxaIva       = taxaIva.orEmpty(),
+        total         = totalLinha?.replace(',', '.').orEmpty()
+    )
+
+    private fun parsarDataLlm(valor: String?): LocalDate? {
+        valor ?: return null
+        val formatos = listOf(
+            DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
+            DateTimeFormatter.ofPattern("dd-MM-yyyy"),
+            DateTimeFormatter.ofPattern("dd.MM.yyyy")
+        )
+        for (fmt in formatos) {
+            runCatching { LocalDate.parse(valor.trim(), fmt) }.getOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun parsarHoraLlm(valor: String?): LocalTime? {
+        valor ?: return null
+        return runCatching {
+            LocalTime.parse(valor.trim(), DateTimeFormatter.ofPattern("HH:mm"))
+        }.getOrNull() ?: runCatching {
+            LocalTime.parse(valor.trim(), DateTimeFormatter.ofPattern("H:mm"))
+        }.getOrNull()
     }
 
     // -----------------------------------------------------------------------

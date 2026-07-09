@@ -6,6 +6,8 @@ import pt.controleobras.app.core.model.WorkerFormData
 
 data class ReceiptFlowUiState(
     val isProcessing: Boolean = false,
+    /** Mensagem de estado mostrada durante o processamento (OCR, IA, etc.). */
+    val statusProcessamento: String = "",
     val draft: TalaoDraft? = null,
     val errorMessage: String? = null,
     val savedTalaoId: Long? = null,

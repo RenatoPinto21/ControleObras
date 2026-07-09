@@ -25,8 +25,18 @@ class AppPreferences @Inject constructor(
         get() = prefs.getString(CHAVE_DRIVE_FOLDER, null)
         set(value) = prefs.edit { putString(CHAVE_DRIVE_FOLDER, value) }
 
+    /**
+     * ID do download do modelo LLM em curso (DownloadManager).
+     * -1L = sem download ativo.
+     * Persistido para poder re-verificar o estado após reiniciar a app.
+     */
+    var llmDownloadId: Long
+        get() = prefs.getLong(CHAVE_LLM_DOWNLOAD_ID, -1L)
+        set(value) = prefs.edit { putLong(CHAVE_LLM_DOWNLOAD_ID, value) }
+
     private companion object {
-        const val CHAVE_BOAS_VINDAS = "ja_viu_boas_vindas"
-        const val CHAVE_DRIVE_FOLDER = "drive_folder_uri"
+        const val CHAVE_BOAS_VINDAS      = "ja_viu_boas_vindas"
+        const val CHAVE_DRIVE_FOLDER     = "drive_folder_uri"
+        const val CHAVE_LLM_DOWNLOAD_ID  = "llm_download_id"
     }
 }

@@ -386,3 +386,155 @@ Reescrito de raiz com uma estratégia em **duas camadas para cada campo**:
 - Rótulo: OBS, OBSERVAÇÕES, NOTAS, NOTA: — extrai o texto que se segue
 
 **Não foi possível compilar neste ambiente.** Faz Gradle Sync + Build + instala no tablet. O parser melhorado deve cobrir muito mais formatos de fatura (talões de supermercado, restaurante, posto de combustível, faturas de obra, faturas de material, recibos de serviços).
+
+---
+
+## LLM local offline — Gemma 3 1B via MediaPipe (2026-07-09)
+
+Pedido do utilizador: usar um modelo de linguagem local (offline) para extrair dados das faturas com muito maior precisão do que os regex.
+
+### Modelo escolhido: Gemma 3 1B IT GPU INT4
+
+| Critério | Valor |
+|---|---|
+| Tamanho do ficheiro | ~1.1 GB |
+| RAM necessária | ~1.5 GB |
+| Inferência num tablet médio | 10–20 segundos |
+| Modo de execução | GPU (Adreno/Mali via OpenGL ES / Vulkan) |
+| Conectividade | Totalmente offline após instalação |
+| Biblioteca | `com.google.mediapipe:tasks-genai:0.10.22` |
+
+### Hierarquia de extração (da mais fiável para a menos)
+
+1. **QR code AT** (dados inseridos pelo emitente — infalível)
+2. **LLM Gemma 3 1B** (compreensão semântica do texto OCR — novo)
+3. **HeuristicReceiptParser** (regex — fallback sempre disponível)
+
+O LLM só é usado se o modelo estiver instalado no dispositivo. Se não estiver, o comportamento é idêntico ao anterior (heurístico + QR).
+
+### Instalação do modelo (admin)
+
+O ficheiro do modelo deve ser colocado em:
+```
+Android/data/pt.controleobras.app/files/llm/gemma-3-1b-it-gpu-int4.bin
+```
+Acessível via gestor de ficheiros Android sem root, ou via ADB:
+```
+adb push gemma-3-1b-it-gpu-int4.bin /sdcard/Android/data/pt.controleobras.app/files/llm/
+```
+Download: https://huggingface.co/google/gemma-3-1b-it-litert-lc-preview
+
+### Ficheiros criados
+
+- `core/llm/LlmExtractionResult.kt` — `@Serializable` com campos nullable: empresa, nif, morada, data, hora, numeroFatura, total, iva, itens[], observacoes
+- `core/llm/LlmExtractor.kt` — interface: `isModelReady(): Boolean` + `suspend extract(text): LlmExtractionResult?`
+- `core/llm/LlmModelManager.kt` — `@Singleton`; gere o caminho `externalFilesDir/llm/model.bin`; `modelExists()` valida tamanho mínimo (500 MB)
+- `core/llm/MediaPipeLlmExtractor.kt` — `@Singleton`; init lazy com `Mutex`; temperatura 0.0 (determinista); prompt Gemma instruct (`<start_of_turn>user/model`); extrai JSON da resposta (suporta blocos Markdown e JSON puro); fallback se init falhar
+- `di/LlmModule.kt` — `@Binds LlmExtractor → MediaPipeLlmExtractor`
+
+### Ficheiros alterados
+
+- `gradle/libs.versions.toml` — `mediapipeTasks = "0.10.22"` + `mediapipe-tasks-genai`
+- `app/build.gradle.kts` — `implementation(libs.mediapipe.tasks.genai)`
+- `feature/receiptflow/viewmodel/ReceiptFlowUiState.kt` — novo campo `statusProcessamento: String`
+- `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt` — injeta `LlmExtractor`; em `processarImagem()`: tenta LLM → se falhar usa heurístico; atualiza `statusProcessamento` ("A ler imagem (OCR)...", "A analisar com IA (Gemma)..."); `llmResultToDraft()` converte `LlmExtractionResult` para `TalaoDraft`
+- `feature/home/viewmodel/HomeViewModel.kt` — injeta `LlmModelManager`; expõe `modeloIaDisponivel: StateFlow<Boolean>` e `verificarModeloIa()` (chamado em `onResume`)
+- `feature/home/ui/HomeScreen.kt` — `DriveStatusBanner` generalizado para `StatusBanner` reutilizável; adicionado banner "Inteligência Artificial" (verde/amarelo); `DisposableEffect` + `LifecycleEventObserver` para re-verificar modelo ao voltar ao ecrã
+
+**Não foi possível compilar neste ambiente.** Faz Gradle Sync + Build + instalação. Sem o modelo instalado, a app funciona exatamente como antes (heurístico + QR). Com o modelo instalado, os dados das faturas deverão ser extraídos com muito maior precisão, especialmente em formatos não-standard.
+
+---
+
+## Download automático do modelo IA (2026-07-09)
+
+Pedido do utilizador: o modelo deve ser descarregado automaticamente dentro da app, sem passos manuais. O link HuggingFace anterior não funcionava.
+
+### Solução
+
+Substituído **Gemma 3 1B** (HuggingFace, requer login) por **Gemma 2B IT INT4** (Google Storage público, sem login, sem conta):
+
+```
+URL: https://storage.googleapis.com/mediapipe-models/llm_inference/
+     gemma-2-2b-it-gpu-int4/float32/1/gemma-2-2b-it-gpu-int4.bin
+Tamanho: ~1.3 GB
+Login: não requerido
+```
+
+### Como funciona na app
+
+1. Ao abrir a app, a HomeScreen mostra o banner IA **amarelo** com botão **"Descarregar"**
+2. Ao tocar, o DownloadManager do Android inicia o download em background
+3. A barra de progresso com percentagem e tamanho aparece no banner
+4. O download continua mesmo com a app fechada (notificação no sistema)
+5. Quando concluído, o banner fica **verde** automaticamente e a IA está ativa
+
+### Ficheiros criados
+
+- `core/llm/LlmDownloadProgress.kt` — estado do download (`IDLE`, `A_DESCARREGAR`, `CONCLUIDO`, `ERRO`) + `descricaoTamanho` formatada
+- `core/llm/LlmModelDownloader.kt` — wrapper `@Singleton` sobre `DownloadManager`; `iniciarDownload()`, `queryProgress(id)`, `cancelar(id)`
+
+### Ficheiros alterados
+
+- `core/llm/LlmModelManager.kt` — modelo atualizado para Gemma 2B; `MODEL_URL` público; `MODEL_FILENAME = "gemma-2-2b-it-gpu-int4.bin"`
+- `core/common/AppPreferences.kt` — novo campo `llmDownloadId: Long` (persiste entre sessões para retomar monitorização após reinício da app)
+- `feature/home/viewmodel/HomeViewModel.kt` — injeta `LlmModelDownloader`; `iniciarDownloadModelo()`, `cancelarDownload()`; polling a cada 500ms via coroutine; retoma polling no `init` se havia download em curso
+- `feature/home/ui/HomeScreen.kt` — `IaBanner()` separado do `StatusBanner`; mostra barra de progresso determinada (`LinearProgressIndicator` com `progress = percentagem/100f`) ou indeterminada; botão "Descarregar" / "Cancelar" / "Tentar de novo" conforme estado
+
+**Não foi possível compilar neste ambiente.** Faz Gradle Sync + Build + instalação. Na primeira abertura, o banner IA aparece amarelo — toca em "Descarregar" para iniciar o download automático (~1.3 GB, necessita WiFi ou dados).
+
+---
+
+## Prompt IA melhorado + novos campos de fatura (2026-07-09)
+
+Pedido do utilizador: separar NIF fornecedor/cliente, extrair série do documento, data de vencimento, método de pagamento, desconto e taxa de IVA por linha de produto.
+
+### Contexto
+
+A estrutura de dados foi alargada em 3 camadas simultâneas: (1) modelos de domínio, (2) base de dados, (3) extração por LLM e heurístico. O XML não foi alterado (pedido explícito do utilizador).
+
+### Novos campos
+
+| Campo | Onde aparece | Observações |
+|---|---|---|
+| `nifCliente` | TalaoDraft, Talao, TalaoEntity | NIF da empresa de construção (cliente) |
+| `serie` | TalaoDraft, Talao, TalaoEntity | Série do doc. AT (ex: "A" de "FT A/1234") |
+| `dataVencimento` | TalaoDraft, Talao, TalaoEntity | Data limite de pagamento |
+| `metodoPagamento` | TalaoDraft, Talao, TalaoEntity | Ex: "Multibanco", "MB Way", "Numerário" |
+| `desconto` (por item) | ItemTalaoDraft, ItemTalao, ItemTalaoDto | Desconto na linha de produto |
+| `taxaIva` (por item) | ItemTalaoDraft, ItemTalao, ItemTalaoDto | Taxa IVA em % (6, 13 ou 23) |
+
+### Ficheiros alterados
+
+**Modelos de domínio**
+- `core/model/TalaoDraft.kt` — 4 novos campos: `nifCliente`, `serie`, `dataVencimento`, `metodoPagamento`
+- `core/model/Talao.kt` — idem
+- `core/model/ItemTalaoDraft.kt` — 2 novos campos: `desconto`, `taxaIva`
+- `core/model/ItemTalao.kt` — idem (nullable com default null)
+- `core/model/TalaoDraftMapper.kt` — mapeia todos os novos campos
+
+**Base de dados**
+- `core/database/entity/TalaoEntity.kt` — 4 novas colunas nullable
+- `core/database/entity/ItemTalaoDto.kt` — `desconto = ""`, `taxaIva = ""` (defaults garantem compatibilidade com JSON antigo)
+- `core/database/mapper/TalaoMapper.kt` — mapeia todos os novos campos
+- `core/database/Migrations.kt` — `MIGRATION_2_3`: `ALTER TABLE talao ADD COLUMN` para 4 colunas (só SQL, sem apagar dados)
+- `core/database/AppDatabase.kt` — versão 2 → 3
+- `di/DatabaseModule.kt` — `MIGRATION_2_3` registada no builder
+
+**LLM**
+- `core/llm/LlmExtractionResult.kt` — novo schema com snake_case e campos separados: `fornecedor`, `nif_fornecedor`, `nif_cliente`, `serie`, `data_emissao`, `data_vencimento`, `metodo_pagamento`, `subtotal`, `iva_total`, `total`, `linhas[]` com `desconto`/`taxa_iva`/`total_linha`; usa `@SerialName` para mapeamento JSON ↔ Kotlin
+- `core/llm/MediaPipeLlmExtractor.kt` — prompt reescrito: separa fornecedor/cliente, explica extração de série, inclui "Nunca inventes valores", instrução QR AT, limita OCR a 2500 chars
+
+**ViewModel**
+- `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt` — `llmResultToDraft()` mapeado para todos os novos campos; `LlmItemResult.toItemTalaoDraft()` inclui `desconto`, `taxaIva`, `totalLinha`; chamada a `exportar()` passa `draft` em vez de apenas `fornecedor`
+
+**Exportação CSV**
+- `core/export/CapturaCsvExporter.kt` — assinatura atualizada para receber `TalaoDraft`; 5 novas colunas: `NIF_FORNECEDOR`, `NIF_CLIENTE`, `SERIE`, `DATA_VENCIMENTO`, `METODO_PAGAMENTO`
+
+**Parser heurístico**
+- `core/parser/HeuristicReceiptParser.kt` — 4 novos métodos de extração:
+  - `extrairNifCliente()` — procura rótulo "NIF DO CLIENTE" / "ADQUIRENTE" / "A/C NIF"; fallback: segundo NIF válido diferente do fornecedor
+  - `extrairSerie()` — extrai da parte entre tipo de doc e `/` (ex: "FT **A**/1234"); fallback: rótulo "SÉRIE:"
+  - `extrairDataVencimento()` — rótulos: VENCIMENTO, PRAZO DE PAGAMENTO, DATA LIMITE, DATA VENC.
+  - `extrairMetodoPagamento()` — rótulo "FORMA DE PAGAMENTO:"; fallback: palavras-chave MB WAY, MULTIBANCO, TRANSFERÊNCIA, VISA, MASTERCARD, NUMERÁRIO, CHEQUE no texto
+
+**Não foi possível compilar neste ambiente.** Faz Gradle Sync + Build + reinstalação. A migração 2→3 corre automaticamente na primeira abertura — não apaga dados existentes. O CSV de captura agora inclui NIF do fornecedor, NIF do cliente, série, data de vencimento e método de pagamento.
