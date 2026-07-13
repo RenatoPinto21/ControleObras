@@ -3,11 +3,11 @@ package pt.controleobras.app.core.model
 import java.math.BigDecimal
 
 /**
- * Converte o rascunho editado pelo utilizador no modelo de domínio final,
- * validando o mínimo indispensável (empresa não vazia e preço unitário de cada item).
+ * Converte o rascunho editado pelo utilizador no modelo de domínio final.
+ * Nenhum campo é obrigatório — o utilizador pode gravar mesmo com campos em falta.
+ * A validação visual (VALID/SUSPECT/MISSING) é informativa, nunca bloqueante.
  */
 fun TalaoDraft.paraDominio(): Talao {
-    require(empresa.isNotBlank()) { "A empresa é obrigatória." }
     return Talao(
         empresa          = empresa.trim(),
         nif              = nif.trim().ifBlank { null },

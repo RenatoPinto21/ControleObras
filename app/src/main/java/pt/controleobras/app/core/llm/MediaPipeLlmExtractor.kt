@@ -70,7 +70,10 @@ class MediaPipeLlmExtractor @Inject constructor(
     private fun criarInstancia(): LlmInference? = runCatching {
         val options = LlmInferenceOptions.builder()
             .setModelPath(modelManager.modelPath)
-            .setMaxTokens(1024)          // suficiente para JSON de uma fatura
+            // maxTokens = janela total (input + output).
+            // Prompt base ≈ 700 tokens + OCR truncado a 1500 chars ≈ 375 tokens → input ≈ 1075.
+            // Sobram ≈ 973 tokens para o JSON de resposta. Gemma 3-1B suporta até 8192.
+            .setMaxTokens(2048)
             .setMaxTopK(40)              // limita o espaço de sampling
             .build()
         LlmInference.createFromOptions(context, options)
@@ -131,8 +134,9 @@ class MediaPipeLlmExtractor @Inject constructor(
             """.trimIndent()
         )
         append("\n")
-        // Limitar o texto OCR a 2500 caracteres para não exceder o contexto do modelo
-        append(ocrText.take(2500))
+        // Limitar o texto OCR a 1500 caracteres (≈375 tokens) para garantir que
+        // o total de tokens do prompt (base ≈700 + OCR ≈375) fica bem abaixo de maxTokens(2048).
+        append(ocrText.take(1500))
         append("\n<end_of_turn>\n")
         append("<start_of_turn>model\n")
     }

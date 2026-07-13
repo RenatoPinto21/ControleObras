@@ -4,7 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,32 +15,40 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -61,12 +71,11 @@ fun HomeScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val mostrarBoasVindas  by viewModel.mostrarBoasVindas.collectAsState()
-    val driveConfigurado   by viewModel.driveConfigurado.collectAsState()
-    val modeloDisponivel   by viewModel.modeloIaDisponivel.collectAsState()
-    val downloadProgress   by viewModel.downloadProgress.collectAsState()
+    val mostrarBoasVindas by viewModel.mostrarBoasVindas.collectAsState()
+    val driveConfigurado  by viewModel.driveConfigurado.collectAsState()
+    val modeloDisponivel  by viewModel.modeloIaDisponivel.collectAsState()
+    val downloadProgress  by viewModel.downloadProgress.collectAsState()
 
-    // Re-verificar modelo ao voltar ao ecrã (utilizador pode ter copiado ficheiro)
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) viewModel.verificarModeloIa()
@@ -75,7 +84,6 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    // SAF: picker para selecionar pasta Google Drive
     val driveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
@@ -88,73 +96,127 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(title = { Text(text = stringResource(R.string.app_name)) })
+    Column(
+        modifier = modifier.fillMaxSize()
+    ) {
+        // ─── Cabeçalho com gradiente laranja ──────────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                        )
+                    )
+                )
+                .statusBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+        ) {
+            Column {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "Gestão de despesas em obra",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.85f)
+                )
+            }
         }
-    ) { innerPadding ->
+
+        // ─── Conteúdo principal ───────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(24.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(top = 24.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // ── Ações principais ──────────────────────────────────────────────
             Text(
-                text = stringResource(R.string.home_placeholder),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = stringResource(R.string.home_instrucao),
-                style = MaterialTheme.typography.bodyMedium,
+                text = "O que pretende fazer?",
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
+                fontWeight = FontWeight.Medium
             )
 
-            Spacer(Modifier.height(24.dp))
+            // Botão principal — registar talão
+            Button(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                onClick = onNovoTalao,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AddCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.home_novo_talao),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
 
-            // ── Google Drive ─────────────────────────────────────────────────
+            // Botão secundário — histórico
+            FilledTonalButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                onClick = onHistorico,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.home_historico),
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Estado dos serviços ───────────────────────────────────────────
+            Text(
+                text = "Estado dos serviços",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium
+            )
+
             StatusBanner(
                 titulo = "Google Drive",
                 descricao = if (driveConfigurado)
                     "Pasta configurada — uploads automáticos"
                 else
-                    "Sem pasta configurada — toca em Configurar",
+                    "Sem pasta — backups desativados",
                 configurado = driveConfigurado,
                 labelBotao = if (driveConfigurado) "Alterar" else "Configurar",
                 onAcao = { driveLauncher.launch(null) }
             )
 
-            Spacer(Modifier.height(8.dp))
-
-            // ── Modelo IA ────────────────────────────────────────────────────
             IaBanner(
                 modeloDisponivel = modeloDisponivel,
                 downloadProgress = downloadProgress,
-                onDescarregar = { viewModel.iniciarDownloadModelo() },
-                onCancelar = { viewModel.cancelarDownload() }
+                onDescarregar    = { viewModel.iniciarDownloadModelo() },
+                onCancelar       = { viewModel.cancelarDownload() }
             )
-
-            Spacer(Modifier.height(24.dp))
-
-            // ── Ações principais ─────────────────────────────────────────────
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onNovoTalao
-            ) {
-                Text(text = stringResource(R.string.home_novo_talao))
-            }
-            OutlinedButton(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                onClick = onHistorico
-            ) {
-                Text(text = stringResource(R.string.home_historico))
-            }
         }
     }
 
@@ -180,7 +242,7 @@ fun HomeScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Banner de estado do modelo IA (com progresso de download)
+// Banner de estado do modelo IA
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -193,14 +255,14 @@ private fun IaBanner(
     val aDescarregar = downloadProgress.estado == LlmDownloadEstado.A_DESCARREGAR
     val erroDownload  = downloadProgress.estado == LlmDownloadEstado.ERRO
 
-    val corFundo  = if (modeloDisponivel) Color(0xFFE8F5E9) else Color(0xFFFFF8E1)
-    val corTexto  = if (modeloDisponivel) Color(0xFF388E3C) else Color(0xFFF57F17)
+    val corFundo = if (modeloDisponivel) Color(0xFFE8F5E9) else Color(0xFFFFF8E1)
+    val corTexto = if (modeloDisponivel) Color(0xFF2E7D32) else Color(0xFFF57F17)
 
-    Surface(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = corFundo,
-        tonalElevation = 0.dp
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = corFundo),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(
@@ -218,27 +280,26 @@ private fun IaBanner(
                     Text(
                         text = "Inteligência Artificial (Gemma 2B)",
                         style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
                         color = corTexto
                     )
                     Text(
                         text = when {
-                            modeloDisponivel  -> "Modelo instalado — extração avançada ativa"
-                            aDescarregar      ->
+                            modeloDisponivel -> "Modelo instalado — extração avançada ativa"
+                            aDescarregar ->
                                 if (downloadProgress.percentagem >= 0)
                                     "A descarregar... ${downloadProgress.percentagem}% (${downloadProgress.descricaoTamanho})"
                                 else
                                     "A descarregar... (${downloadProgress.descricaoTamanho})"
-                            erroDownload      -> "Erro no download — verifica a ligação e tenta de novo"
-                            else              -> "Modelo não instalado — necessário para extração inteligente"
+                            erroDownload -> "Erro no download — verifique a ligação"
+                            else -> "Não instalado — necessário para extração avançada"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = corTexto
+                        color = corTexto.copy(alpha = 0.8f)
                     )
                 }
-
-                // Botão de ação
                 when {
-                    modeloDisponivel -> { /* nada — já está instalado */ }
+                    modeloDisponivel -> { /* já instalado */ }
                     aDescarregar -> TextButton(onClick = onCancelar) {
                         Text("Cancelar", color = corTexto)
                     }
@@ -247,20 +308,18 @@ private fun IaBanner(
                     }
                 }
             }
-
-            // Barra de progresso (visível só durante download)
             if (aDescarregar) {
                 Spacer(Modifier.height(8.dp))
                 if (downloadProgress.percentagem in 0..100) {
                     LinearProgressIndicator(
                         progress = { downloadProgress.percentagem / 100f },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
                         color = corTexto,
                         trackColor = corTexto.copy(alpha = 0.2f)
                     )
                 } else {
                     LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
                         color = corTexto,
                         trackColor = corTexto.copy(alpha = 0.2f)
                     )
@@ -271,7 +330,7 @@ private fun IaBanner(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Banner genérico reutilizável (Drive, etc.)
+// Banner genérico (Drive, etc.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -283,13 +342,13 @@ private fun StatusBanner(
     onAcao: () -> Unit
 ) {
     val corFundo = if (configurado) Color(0xFFE8F5E9) else Color(0xFFFFF8E1)
-    val corTexto = if (configurado) Color(0xFF388E3C) else Color(0xFFF57F17)
+    val corTexto = if (configurado) Color(0xFF2E7D32) else Color(0xFFF57F17)
 
-    Surface(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = corFundo,
-        tonalElevation = 0.dp
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = corFundo),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -303,8 +362,17 @@ private fun StatusBanner(
                 modifier = Modifier.size(22.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
-                Text(titulo, style = MaterialTheme.typography.labelMedium, color = corTexto)
-                Text(descricao, style = MaterialTheme.typography.bodySmall, color = corTexto)
+                Text(
+                    titulo,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = corTexto
+                )
+                Text(
+                    descricao,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = corTexto.copy(alpha = 0.8f)
+                )
             }
             if (labelBotao != null) {
                 TextButton(onClick = onAcao) {

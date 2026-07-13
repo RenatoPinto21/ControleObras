@@ -538,3 +538,258 @@ A estrutura de dados foi alargada em 3 camadas simultâneas: (1) modelos de dom�
   - `extrairMetodoPagamento()` — rótulo "FORMA DE PAGAMENTO:"; fallback: palavras-chave MB WAY, MULTIBANCO, TRANSFERÊNCIA, VISA, MASTERCARD, NUMERÁRIO, CHEQUE no texto
 
 **Não foi possível compilar neste ambiente.** Faz Gradle Sync + Build + reinstalação. A migração 2→3 corre automaticamente na primeira abertura — não apaga dados existentes. O CSV de captura agora inclui NIF do fornecedor, NIF do cliente, série, data de vencimento e método de pagamento.
+
+---
+
+## Crash OCR + imagem imediata (2026-07-09)
+
+### Crash ao fotografar — maxTokens insuficiente
+
+O app encerrava abruptamente (JNI SIGABRT) ao tirar foto. Causa raiz: `MediaPipeLlmExtractor` usava `setMaxTokens(1024)` mas o prompt enviado ao Gemma tinha 1165 tokens. O parâmetro `maxTokens` é o budget total (input + output), não só output — excedê-lo causa um crash nativo não capturável em Kotlin.
+
+**Ficheiro alterado:** `core/llm/MediaPipeLlmExtractor.kt`
+- `setMaxTokens(1024)` → `setMaxTokens(2048)` (Gemma suporta até 8192)
+- `ocrText.take(2500)` → `ocrText.take(1500)` (reduz texto OCR para ≈375 tokens, prompt base ≈700 tokens)
+
+### Imagem visível imediatamente (sem esperar OCR)
+
+O app demorava a mostrar qualquer coisa após a fotografia. O utilizador via um ecrã em branco durante o processamento (20–60s). Solução: navegar para o ecrã de revisão logo que a imagem é capturada; mostrar a imagem imediatamente; spinner enquanto o OCR/LLM corre em background; campos preenchidos quando o processamento termina.
+
+**`feature/receiptflow/viewmodel/ReceiptFlowUiState.kt`** — novo campo `imagemCapturadaPath: String?`
+
+**`feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt`** — `processarImagem()` define `imagemCapturadaPath = imagemPath` **antes** de qualquer processamento
+
+**`feature/receiptcapture/ui/CameraCaptureScreen.kt`** — navegação disparada por `imagemCapturadaPath != null` (era `draft != null`)
+
+**`feature/receiptreview/ui/ReceiptReviewScreen.kt`** — mostra imagem sempre; spinner quando `draft == null`; campos quando `draft != null`
+
+---
+
+## Nova arquitetura de extração — extrator posicional + validação (2026-07-09)
+
+### Contexto
+
+O pipeline OCR → LLM (Gemma 2B) apresentava dois problemas críticos em uso real: (1) velocidade — 30 a 60 segundos por fatura é inaceitável em uso diário intenso; (2) fiabilidade — o modelo gerava campos inventados ou falhava a interpretar formatos de fatura não-standard.
+
+Foi feita análise das abordagens de concorrentes (Contabify, Parseur, Klippa) e decidiu-se implementar uma solução própria com 4 camadas, 100% offline, com velocidade alvo de 1–2 segundos:
+
+```
+QR code AT (Portaria 195/2020)          ← mais fiável (dados do emitente)
+  ↓ (quando sem QR ou campos em falta)
+PositionAwareReceiptExtractor            ← usa layout visual (X, Y) da fatura
+  ↓ (fallback)
+HeuristicReceiptParser                   ← regex sobre texto concatenado
+  ↓ (sempre, sobre o resultado final)
+InvoiceFieldValidator                    ← valida NIF, datas, IVA, cruzamentos
+```
+
+### Ficheiros criados
+
+**`core/ocr/StructuredOcrResult.kt`**
+- `StructuredOcrResult(elements, fullText, imageWidth, imageHeight)`
+- `OcrElement(text, left, top, right, bottom, confidence)` — coordenadas normalizadas (0.0–1.0)
+- Propriedades calculadas: `centerX`, `centerY`, `height`, `width`
+
+**`core/validation/FieldState.kt`**
+- `enum class FieldState { VALID, SUSPECT, MISSING }`
+- `data class FieldValidation(state, hint)` com `companion` para `valid()`, `suspect(hint)`, `missing(hint?)`
+
+**`core/validation/NifValidator.kt`** — `@Singleton`
+- `isValid(nif)` — 4 regras: 9 dígitos, sem letras, primeiro ∈ {1,2,3,5,6,7,8,9}, checksum módulo 11
+- `motivoInvalido(nif)` — mensagem específica por tipo de falha (comprimento, letra, primeiro dígito, checksum)
+
+**`core/validation/InvoiceFieldValidator.kt`** — `@Singleton`
+- Valida todos os campos de um `TalaoDraft`, devolve `Map<String, FieldValidation>`
+- Cross-validações: IVA < Total; total da linha ≈ qtd × preço (±0.02€ por arredondamento)
+- Taxa IVA: só 6%, 13%, 23% são legais em Portugal
+- Data: não anterior a 2000, não no futuro (+3 dias de tolerância para datas de emissão tarde)
+
+**`core/extractor/PositionAwareReceiptExtractor.kt`** — `@Singleton`
+- Divide a imagem em 3 zonas por Y normalizado: cabeçalho (0.00–0.42), corpo (0.33–0.78), rodapé (0.63–1.00)
+- Agrupa elementos em linhas por proximidade Y (`|centerY_a - centerY_b| < 0.018`)
+- Extrai empresa pela linha com maior fonte (height) ou sufixo legal (Lda., S.A., etc.)
+- Extrai NIF fornecedor e NIF cliente por rótulo explícito e por checksum
+- Extrai produtos pela posição X: descrição (X < 0.52), qtd (0.52–0.66), preço (0.66–0.82), total (X > 0.82)
+- Extrai total, IVA, método de pagamento do rodapé
+
+### Ficheiros alterados
+
+**`core/ocr/TextRecognizer.kt`** — interface alargada:
+- `recognizeText()` mantido (compatibilidade retroativa)
+- `recognizeStructured()` adicionado — devolve `StructuredOcrResult`
+
+**`core/ocr/MlKitTextRecognizer.kt`** — implementa `recognizeStructured()`:
+- Itera `TextBlock → TextLine → TextElement`, cada um com `boundingBox: Rect?`
+- Normaliza coordenadas: `left / imageWidth`, `top / imageHeight`, etc.
+- `element.confidence` não existe em ML Kit 16.x — usa `1f` como default (sem erro)
+
+**`core/qr/AtQrCodeParser.kt`** — campo B adicionado:
+- Campo AT `B` = NIF do adquirente (comprador / vosso NIF) → `nifCliente`
+- `AtQrData` tem novo campo `nifCliente: String?`
+- NIF "999999990" (consumidor final) é filtrado no merge (não sobrepõe NIF do cliente real)
+
+**`feature/receiptflow/viewmodel/ReceiptFlowUiState.kt`** — novo campo:
+- `validacoes: Map<String, FieldValidation> = emptyMap()` — resultado da validação por campo
+
+**`feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt`** — pipeline reescrito:
+- Injeta `PositionAwareReceiptExtractor` e `InvoiceFieldValidator`
+- `processarImagem()` usa `recognizeStructured()` em vez de `recognizeText()`
+- Pipeline: OCR estruturado + QR + GPS paralelo → extrator posicional → merge QR → validação → estado
+- LLM Gemma removido do pipeline primário (mantido injetado para uso futuro)
+- `mergeDraft()` inclui `nifCliente` do QR (campo B), filtrando "999999990"
+
+**`feature/receiptreview/ui/ReceiptReviewScreen.kt`** — UI com 3 estados visuais:
+- `CampoValidado(rotulo, valor, validacao)` substitui `CampoLeitura()` e `AvisoCampoNaoEncontrado()`
+  - VALID → fundo verde claro `#E8F5E9` + ícone CheckCircle `#2E7D32`
+  - SUSPECT → fundo amarelo `#FFF8E1` + ícone Warning `#F57F17` + hint específico
+  - MISSING → fundo cinzento `#ECEFF1` + ícone Help `#78909C` + mensagem
+- `LegendaEstados()` explica o código de cores + indica se QR AT foi detetado
+- `CardProduto()` recebe validações de total de linha e taxa IVA — fica amarelo se SUSPECT
+- Secções separadas: Fornecedor / Vosso NIF / Documento / Valores / Produtos
+- Campo "NIF do cliente (vosso)" visível no ecrã de revisão
+
+**Não foi possível compilar neste ambiente.** Para build e instalação, usar os comandos descritos abaixo.
+
+### Comandos de build (copiar e colar)
+
+```
+cd C:\Users\Estagio\Projetos\ControleObras
+gradlew.bat assembleDebug
+```
+
+Depois de compilar com sucesso:
+```
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+### O que testar
+
+1. Tirar foto de uma fatura com QR AT → revisão abre **imediatamente** com a imagem → em 1–3s os campos aparecem
+2. Verificar que o **NIF do cliente (vosso)** aparece preenchido quando o QR contém o campo B
+3. Verificar os **3 estados visuais** nos campos: verde = encontrado e válido; amarelo = suspeito (com mensagem explicativa); cinzento = não encontrado
+4. Testar com uma fatura **sem QR** → snackbar "Sem QR code AT" → campos extraídos por OCR posicional
+5. Verificar que o botão "Guardar fatura" funciona e os dados ficam no histórico
+
+---
+
+## Morada robusta + filtro sanitizar + botão re-escanear QR + diálogo pré-guardar (2026-07-09)
+
+Quatro melhorias pedidas após testes com talões reais (ALDI e outros supermercados):
+
+### 1. Morada com lixo de OCR — fix
+
+**Problema:** em talões de supermercado, a morada mostrava centenas de carateres de texto OCR misturado porque `VIA_REGEX` encontrava "Rua" dentro de uma linha longa com todo o talão concatenado.
+
+**Fix em `core/extractor/PositionAwareReceiptExtractor.kt`:**
+- `extrairMorada()` agora exige `linha.length <= 90` **e** `!EH_RUIDO_MORADA_REGEX.containsMatchIn(linha)` em cada linha candidata
+- `EH_RUIDO_MORADA_REGEX` adicionado ao `companion object` — filtra palavras de pagamento/produto que nunca fazem parte de uma morada
+
+### 2. Filtro pós-extração `sanitizar()`
+
+Adicionado ao final de `extract()` em `PositionAwareReceiptExtractor.kt`. Anula campos que claramente contêm lixo:
+- `empresa` — rejeitado se length > 60, proporção letras < 35%, ou contém ruído de rodapé
+- `morada` — rejeitado se length > 100 ou contém palavras de ruído
+- `nif` / `nifCliente` — apenas aceite se passa o checksum módulo 11
+- `iva` / `total` — apenas aceite se o formato é exatamente `\d+[.,]\d{2}` (novo `VALOR_EXATO_REGEX`)
+
+### 3. Botão "Tentar ler QR code AT"
+
+**Problema:** quando o QR não é detetado automaticamente, o utilizador não tinha como tentar de novo sem tirar nova fotografia.
+
+**Ficheiro alterado: `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt`**
+- Novo método `reescanearQr(context)` — reutiliza a imagem já guardada (`imagemCapturadaPath`), corre só o QR reader, faz merge com o draft atual, re-valida todos os campos
+
+**Ficheiro alterado: `feature/receiptreview/ui/ReceiptReviewScreen.kt`**
+- `BotaoReescanearQr(isLoading, onClick)` — aparece apenas quando `!uiState.qrDetectado && !uiState.isProcessing`
+- Spinner e texto "A ler QR code..." durante o processo
+
+### 4. Diálogo de resumo antes de guardar
+
+**Pedido:** nenhum campo é obrigatório, mas antes de guardar deve aparecer uma mensagem clara a listar o que está em falta.
+
+**Ficheiro alterado: `feature/receiptreview/ui/ReceiptReviewScreen.kt`**
+- `DialogoResumoProblemas(validacoes, onGuardar, onCancelar)` — `AlertDialog` que lista:
+  - "Não encontrado:" — ícone Info + nome do campo, para cada MISSING
+  - "Verificar na fatura:" — ícone Warning + nome + hint, para cada SUSPECT (exceto itens individuais)
+  - Nota: "Pode guardar assim mesmo — pode sempre corrigir mais tarde no histórico"
+  - Botões: "Guardar mesmo assim" (primary) e "Voltar a verificar" (text)
+- Botão "Guardar fatura" verifica `validacoes.values.any { it.state != VALID }` — se houver problemas e `validacoes` não estiver vazio, abre o diálogo; caso contrário guarda diretamente
+
+### Ficheiros alterados neste sprint
+
+| Ficheiro | Alteração |
+|---|---|
+| `core/extractor/PositionAwareReceiptExtractor.kt` | `sanitizar()`, `EH_RUIDO_MORADA_REGEX`, `VALOR_EXATO_REGEX`, `extrairMorada()` com length/noise filter |
+| `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt` | `reescanearQr()` |
+| `feature/receiptreview/ui/ReceiptReviewScreen.kt` | `BotaoReescanearQr()`, `DialogoResumoProblemas()`, lógica botão guardar |
+
+**Não foi possível compilar neste ambiente.** Comandos de build:
+
+```
+cd C:\Users\Estagio\Projetos\ControleObras
+gradlew.bat assembleDebug
+"C:\Users\Estagio\AppData\Local\Android\Sdk\platform-tools\adb.exe" install -r "app\build\outputs\apk\debug\app-debug.apk"
+```
+
+### O que testar
+
+1. Talão com morada — confirmar que o campo mostra só a rua/CP, não linhas longas com lixo
+2. Talão ALDI ou supermercado — campos "lixo" devem aparecer cinzentos (MISSING) em vez de texto incorreto
+3. Fatura sem QR → botão "Tentar ler QR code AT" visível → ao tocar aparece spinner → se encontrar QR, campos ficam verdes; se não encontrar, aparece snackbar de erro
+4. Tocar "Guardar fatura" quando há campos em falta → diálogo lista os problemas → "Guardar mesmo assim" guarda; "Voltar a verificar" fecha o diálogo
+
+---
+
+## Validador com aviso QR + redesenho layout profissional (2026-07-09)
+
+Dois grupos de alterações pedidos pelo utilizador neste sprint:
+
+### Grupo 1 — Aviso "informação pouco segura — falta de QR code"
+
+**Problema:** quando o QR AT não era detetado, os campos críticos apareciam a verde (VALID) mesmo vindo apenas do OCR, que tem muito menor fiabilidade para NIF, Total, IVA, Data e Nº Fatura.
+
+**Solução:** `InvoiceFieldValidator.validate()` recebe agora `temQr: Boolean`. Quando `false`, os campos que o QR normalmente garante (nif, nifCliente, data, numeroFatura, iva, total) são rebaixados de VALID para SUSPECT com hint: `"Informação pouco segura — falta de QR code AT. Confirme na fatura original."`.
+
+**Ficheiros alterados:**
+- `core/validation/InvoiceFieldValidator.kt` — `validate(draft, temQr: Boolean = false)`; bloco de downgrade VALID→SUSPECT no fim do `buildMap`
+- `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt` — `processarImagem()` passa `temQr = atQrData != null`; `processarQrEscaneado()` passa `temQr = true`
+
+### Grupo 2 — Redesenho de layout (cabeçalhos laranja, visual profissional)
+
+Todos os ecrãs foram redesenhados com a paleta de marca (`primary = #FF6D00`), tornando a app mais profissional e menos genérica.
+
+**Princípios aplicados:**
+- Cabeçalho com gradiente laranja em todos os ecrãs (sem `TopAppBar` branco básico)
+- Botões principais com altura 52–56dp, `shape = RoundedCornerShape(12.dp)`, cor primária
+- Cards com `RoundedCornerShape(12.dp)` e `elevation = 0.dp` (flat, limpo)
+- Secções no `ReceiptReviewScreen` com traço laranja lateral (4×16dp)
+- Botão QR ausente → card de alerta laranja proeminente (não mais `OutlinedButton` discreto)
+- `CameraCaptureScreen` → botão captura circular em laranja, painel base com `RoundedCornerShape` no topo
+
+**Ficheiros alterados:**
+- `feature/home/ui/HomeScreen.kt` — cabeçalho com `Brush.verticalGradient`, botão principal FilledButton, botão secundário FilledTonalButton, Cards substituem Surface nos banners
+- `feature/workerform/ui/WorkerFormScreen.kt` — cabeçalho laranja, card azul-claro de contexto, `OutlinedTextField` com `shape = RoundedCornerShape(12.dp)`, limpeza de imports não usados
+- `feature/receiptcapture/ui/CameraCaptureScreen.kt` — botão captura circular `76dp` em laranja com `clickable`, painel base com cantos arredondados, botão galeria `FilledTonalIconButton`, instrução no topo mais clara
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt` — `TopAppBar` laranja com estado QR em subtítulo; `BotaoReescanearQr` → card de alerta laranja com `Button`; `SecaoTitulo` com traço lateral; botão "Guardar fatura" laranja 52dp; import `FilledTonalButton` desnecessário removido
+- `feature/qrscan/ui/QrScanScreen.kt` — `TopAppBar` laranja, painel base com gradiente escuro, ícone `QrCodeScanner` proeminente
+
+**Nova dependência:**
+- `gradle/libs.versions.toml` — `androidx-compose-material-icons-extended` adicionada
+- `app/build.gradle.kts` — `implementation(libs.androidx.compose.material.icons.extended)`
+
+(Os ícones `QrCodeScanner`, `Badge`, `CameraAlt`, `PhotoLibrary`, `History`, `AddCircle` são da lib extended — não estavam disponíveis com `material-icons-core` apenas.)
+
+**Não foi possível compilar neste ambiente.** Comandos de build:
+
+```
+cd C:\Users\Estagio\Projetos\ControleObras
+gradlew.bat assembleDebug
+"C:\Users\Estagio\AppData\Local\Android\Sdk\platform-tools\adb.exe" install -r "app\build\outputs\apk\debug\app-debug.apk"
+```
+
+**O que verificar:**
+1. Todos os ecrãs abrem com cabeçalho laranja
+2. Fatura sem QR → campos NIF, Total, IVA, Data, Nº Fatura mostram fundo amarelo com hint "Informação pouco segura — falta de QR code AT..."
+3. Fatura com QR → campos críticos ficam verdes (VALID) como antes
+4. Botão QR ausente → card laranja visível, botão "Ler QR code AT com a câmara" funcional
+5. Botão "Guardar fatura" laranja em destaque, 52dp de altura

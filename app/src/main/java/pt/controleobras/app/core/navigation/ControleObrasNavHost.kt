@@ -11,6 +11,7 @@ import androidx.navigation.compose.navigation
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import pt.controleobras.app.feature.home.ui.HomeScreen
+import pt.controleobras.app.feature.qrscan.ui.QrScanScreen
 import pt.controleobras.app.feature.receiptcapture.ui.CameraCaptureScreen
 import pt.controleobras.app.feature.receiptdetail.ui.ReceiptDetailScreen
 import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
@@ -84,12 +85,28 @@ fun ControleObrasNavHost(
                 }
                 val viewModel: ReceiptFlowViewModel = hiltViewModel(parentEntry)
                 ReceiptReviewScreen(
-                    viewModel = viewModel,
+                    viewModel  = viewModel,
                     onGuardado = {
                         navController.navigate(ControleObrasDestination.Home.route) {
                             popUpTo(ControleObrasDestination.Home.route) { inclusive = false }
                         }
+                    },
+                    onScanQr   = {
+                        navController.navigate(ControleObrasDestination.QrScan.route)
                     }
+                )
+            }
+
+            // 4. Scan de QR code AT (sem tirar nova fotografia)
+            composable(ControleObrasDestination.QrScan.route) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(ControleObrasDestination.ReceiptFlowGraph.route)
+                }
+                val viewModel: ReceiptFlowViewModel = hiltViewModel(parentEntry)
+                QrScanScreen(
+                    viewModel      = viewModel,
+                    onQrDetectado  = { navController.popBackStack() },
+                    onVoltar       = { navController.popBackStack() }
                 )
             }
         }

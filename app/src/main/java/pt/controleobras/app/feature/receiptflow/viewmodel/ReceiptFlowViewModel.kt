@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import pt.controleobras.app.core.device.DeviceInfo
 import pt.controleobras.app.core.drive.DriveUploader
 import pt.controleobras.app.core.export.CapturaCsvExporter
+import pt.controleobras.app.core.extractor.PositionAwareReceiptExtractor
 import pt.controleobras.app.core.llm.LlmExtractionResult
 import pt.controleobras.app.core.llm.LlmExtractor
 import pt.controleobras.app.core.llm.LlmItemResult
@@ -28,6 +29,7 @@ import pt.controleobras.app.core.parser.ReceiptParser
 import pt.controleobras.app.core.qr.AtQrCodeParser
 import pt.controleobras.app.core.qr.AtQrData
 import pt.controleobras.app.core.qr.QrCodeReader
+import pt.controleobras.app.core.validation.InvoiceFieldValidator
 import pt.controleobras.app.data.repository.TalaoRepository
 import java.io.File
 import java.time.LocalDate
@@ -39,17 +41,19 @@ import javax.inject.Inject
  * Orquestra o fluxo completo:
  *
  *   WorkerForm → Câmara → [foto]
- *     → OCR + QR (paralelo) + GPS + MAC + IDREG
- *     → LLM (Gemma 3 1B, se instalado) ou HeuristicParser (fallback)
- *     → renomeia imagem para {MAC}_{IDREG}.jpg
- *     → gera CSV {MAC}_{IDREG}.csv
- *     → envia ambos para Google Drive (background)
- *     → ecrã de revisão com dados extraídos
+ *     → OCR estruturado + QR + GPS (em paralelo)
+ *     → PositionAwareReceiptExtractor (primário — posição visual dos elementos)
+ *     → HeuristicParser (fallback — apenas texto)
+ *     → merge com QR code AT (QR tem prioridade sobre OCR)
+ *     → InvoiceFieldValidator (valida NIF, datas, valores, cruzamentos)
+ *     → renomeia imagem + gera CSV
+ *     → Google Drive (background)
+ *     → ecrã de revisão com 3 estados visuais (verde/amarelo/cinza)
  *
  * Hierarquia de extração (da mais fiável para a menos):
- *   1. QR code AT  (Portaria 195/2020 — dados inseridos pelo emitente)
- *   2. LLM Gemma   (compreensão semântica do texto OCR)
- *   3. Heurístico  (regex — sempre disponível, sem dependências)
+ *   1. QR code AT  (Portaria 195/2020 — dados emitidos e assinados pelo vendedor)
+ *   2. Posicional  (usa layout visual da fatura — zonas header/corpo/rodapé)
+ *   3. Heurístico  (regex sobre texto concatenado — fallback sem layout)
  *
  * Partilhado entre os ecrãs de formulário, captura e revisão via grafo aninhado.
  */
@@ -60,6 +64,8 @@ class ReceiptFlowViewModel @Inject constructor(
     private val receiptParser: ReceiptParser,
     private val atQrCodeParser: AtQrCodeParser,
     private val llmExtractor: LlmExtractor,
+    private val positionExtractor: PositionAwareReceiptExtractor,
+    private val invoiceValidator: InvoiceFieldValidator,
     private val locationProvider: LocationProvider,
     private val deviceInfo: DeviceInfo,
     private val capturaCsvExporter: CapturaCsvExporter,
@@ -83,84 +89,89 @@ class ReceiptFlowViewModel @Inject constructor(
     // -----------------------------------------------------------------------
 
     fun processarImagem(context: Context, imagemUri: Uri, imagemPath: String) {
+        // Define o path da imagem IMEDIATAMENTE — antes do OCR/LLM.
+        // Isto permite que o ecrã de revisão abra já com a imagem visível
+        // enquanto o processamento (OCR + IA) corre em background.
         _uiState.update {
             it.copy(
                 isProcessing = true,
                 statusProcessamento = "A ler imagem (OCR)...",
                 errorMessage = null,
-                qrDetectado = false
+                qrDetectado = false,
+                draft = null,
+                imagemCapturadaPath = imagemPath
             )
         }
 
         viewModelScope.launch {
             runCatching {
-                // 1. OCR, QR e GPS em paralelo — maximiza aproveitamento do tempo
-                val textoDeferred = async { textRecognizer.recognizeText(context, imagemUri) }
-                val qrDeferred = async {
+                // 1. OCR estruturado + QR + GPS em paralelo
+                val ocrDeferred = async { textRecognizer.recognizeStructured(context, imagemUri) }
+                val qrDeferred  = async {
                     runCatching { qrCodeReader.readQrCode(context, imagemUri) }.getOrNull()
                 }
                 val gpsDeferred = async { locationProvider.getCurrentLocation(context) }
 
-                val texto = textoDeferred.await()
-                val qrContent = qrDeferred.await()
-                val gps = gpsDeferred.await()
+                val ocrResult  = ocrDeferred.await()
+                val qrContent  = qrDeferred.await()
+                val gps        = gpsDeferred.await()
 
                 // 2. Identificadores do registo
-                val mac = deviceInfo.getMacAddress(context)
-                val idReg = deviceInfo.gerarIdReg()
+                val mac    = deviceInfo.getMacAddress(context)
+                val idReg  = deviceInfo.gerarIdReg()
                 val metadata = CaptureMetadata(
                     macAddress = mac,
-                    idReg = idReg,
-                    gps = gps,
-                    qrCodeRaw = qrContent
+                    idReg      = idReg,
+                    gps        = gps,
+                    qrCodeRaw  = qrContent
                 )
 
-                // 3. Renomear imagem para {MAC}_{IDREG}.jpg
-                val destDir = File(context.filesDir, "receipts").also { it.mkdirs() }
+                // 3. Mover imagem para pasta definitiva {MAC}_{IDREG}.jpg
+                val destDir    = File(context.filesDir, "receipts").also { it.mkdirs() }
                 val imagemFinal = File(destDir, "${metadata.fileBaseName}.jpg")
                 File(imagemPath).copyTo(imagemFinal, overwrite = true)
 
-                // 4. Interpretação AT QR code (mais fiável — dados do emitente)
+                // 4. QR code AT — mais fiável (dados do emitente, assinados)
                 val atQrData = qrContent?.let { atQrCodeParser.parse(it) }
 
-                // 5. Extração semântica: LLM (se instalado) ou heurístico (fallback)
-                val draftBase = if (llmExtractor.isModelReady()) {
-                    _uiState.update {
-                        it.copy(statusProcessamento = "A analisar com IA (Gemma)...")
-                    }
-                    val llmResult = runCatching { llmExtractor.extract(texto) }.getOrNull()
-                    llmResult?.let { llmResultToDraft(it, imagemFinal.absolutePath, texto) }
-                        ?: receiptParser.parse(texto, imagemFinal.absolutePath)  // fallback
-                } else {
-                    receiptParser.parse(texto, imagemFinal.absolutePath)
+                // 5. Extração posicional (primária) — usa layout visual da fatura
+                _uiState.update { it.copy(statusProcessamento = "A interpretar estrutura da fatura...") }
+                val draftBase = runCatching {
+                    positionExtractor.extract(ocrResult, imagemFinal.absolutePath)
+                }.getOrElse {
+                    // Fallback: parser heurístico sobre texto concatenado
+                    receiptParser.parse(ocrResult.fullText, imagemFinal.absolutePath)
                 }
 
-                // 6. Merge com QR (QR tem prioridade para os campos que fornece)
+                // 6. Merge com QR (QR sobrepõe campos que fornece)
                 val draft = mergeDraft(draftBase, atQrData)
 
-                // 7. Gerar CSV de registo
+                // 7. Validação de todos os campos (temQr determina confiança dos valores OCR)
+                val validacoes = invoiceValidator.validate(draft, temQr = atQrData != null)
+
+                // 8. Gerar CSV de registo
                 val csvFile = capturaCsvExporter.exportar(
-                    destDir = destDir,
-                    metadata = metadata,
-                    workerData = _uiState.value.workerFormData
-                        ?: WorkerFormData("", "", ""),
-                    atQrData = atQrData,
-                    draft = draft
+                    destDir    = destDir,
+                    metadata   = metadata,
+                    workerData = _uiState.value.workerFormData ?: WorkerFormData("", "", ""),
+                    atQrData   = atQrData,
+                    draft      = draft
                 )
 
-                // 8. Atualizar estado (navega para revisão)
+                // 9. Atualizar estado — ecrã de revisão já está aberto, apenas preenche campos
                 _uiState.update {
                     it.copy(
-                        isProcessing = false,
+                        isProcessing        = false,
                         statusProcessamento = "",
-                        draft = draft,
-                        captureMetadata = metadata,
-                        qrDetectado = atQrData != null,
-                        driveStatus = DriveStatus.IDLE
+                        draft               = draft,
+                        validacoes          = validacoes,
+                        captureMetadata     = metadata,
+                        qrDetectado         = atQrData != null,
+                        driveStatus         = DriveStatus.IDLE
                     )
                 }
 
-                // 9. Upload Drive em background (não bloqueia a UI)
+                // 10. Upload Drive em background (não bloqueia a UI)
                 uploadDrive(context, imagemFinal, csvFile)
 
             }.onFailure { erro ->
@@ -172,6 +183,33 @@ class ReceiptFlowViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Processar QR code lido pela QrScanScreen (câmara em tempo real)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Chamado pela [QrScanScreen] quando deteta um QR code AT.
+     * Faz o merge com o draft existente e re-valida todos os campos.
+     * Não precisa de contexto — o raw value já vem decodificado pelo ML Kit.
+     */
+    fun processarQrEscaneado(qrRawValue: String) {
+        val draft = _uiState.value.draft ?: return
+        val atQrData = atQrCodeParser.parse(qrRawValue) ?: run {
+            _uiState.update { it.copy(errorMessage = "QR code não é um QR code AT válido") }
+            return
+        }
+        val draftAtualizado = mergeDraft(draft, atQrData)
+        val validacoes      = invoiceValidator.validate(draftAtualizado, temQr = true)
+        _uiState.update {
+            it.copy(
+                draft        = draftAtualizado,
+                validacoes   = validacoes,
+                qrDetectado  = true,
+                errorMessage = null
+            )
         }
     }
 
@@ -197,8 +235,11 @@ class ReceiptFlowViewModel @Inject constructor(
 
     private fun mergeDraft(base: TalaoDraft, qr: AtQrData?): TalaoDraft {
         if (qr == null) return base
+        // NIF "999999990" significa "consumidor final" — não sobrepõe campo do cliente
+        val nifClienteQr = qr.nifCliente?.takeIf { it != "999999990" }
         return base.copy(
             nif          = qr.nif.ifBlank { base.nif },
+            nifCliente   = nifClienteQr ?: base.nifCliente,
             data         = qr.data ?: base.data,
             numeroFatura = qr.numeroFatura?.ifBlank { null } ?: base.numeroFatura,
             iva          = qr.totalIva?.ifBlank { null } ?: base.iva,

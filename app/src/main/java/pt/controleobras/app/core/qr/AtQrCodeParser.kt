@@ -14,6 +14,7 @@ import javax.inject.Inject
  *
  * Campos extraídos:
  *   A  = NIF do emitente (vendedor) → [nif]
+ *   B  = NIF do adquirente (comprador / vosso NIF) → [nifCliente]
  *   D  = Tipo de documento (FT, FS, FR, NC, ND, ...) — usado para validar que é fatura
  *   F  = Data no formato YYYYMMDD → [data]
  *   G  = Número do documento (ex: "FT A/1") → [numeroFatura]
@@ -47,12 +48,13 @@ class AtQrCodeParser @Inject constructor() {
         if (!nifEmitente.all(Char::isDigit) || nifEmitente.length !in 9..10) return null
 
         return AtQrData(
-            nif = nifEmitente,
+            nif          = nifEmitente,
+            nifCliente   = campos["B"]?.takeIf { it.all(Char::isDigit) && it.length in 9..10 },
             tipoDocumento = campos["D"],
-            data = parseData(campos["F"]),
+            data         = parseData(campos["F"]),
             numeroFatura = campos["G"],
-            totalIva = campos["N"]?.replace(',', '.'),
-            totalComIva = campos["O"]?.replace(',', '.')
+            totalIva     = campos["N"]?.replace(',', '.'),
+            totalComIva  = campos["O"]?.replace(',', '.')
         )
     }
 
@@ -69,8 +71,10 @@ class AtQrCodeParser @Inject constructor() {
  * Todos os campos são nullable — o parser extrai apenas o que encontrar.
  */
 data class AtQrData(
-    /** NIF do emitente (vendedor). */
+    /** NIF do emitente (vendedor) — campo A. */
     val nif: String,
+    /** NIF do adquirente (comprador / vosso NIF) — campo B. Null quando 999999990 (consumidor final). */
+    val nifCliente: String?,
     /** Tipo de documento: FT=Fatura, FS=Fatura Simplificada, FR=Fatura-Recibo, NC=Nota Crédito, etc. */
     val tipoDocumento: String?,
     /** Data do documento. */

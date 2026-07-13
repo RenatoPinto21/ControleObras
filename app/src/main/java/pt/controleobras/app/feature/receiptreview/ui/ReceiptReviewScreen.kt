@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,14 +15,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,12 +39,16 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,39 +59,92 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import pt.controleobras.app.core.model.ItemTalaoDraft
+import pt.controleobras.app.core.validation.FieldState
+import pt.controleobras.app.core.validation.FieldValidation
 import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
 
 /**
  * Ecrã de revisão pós-OCR.
  *
- * O utilizador NÃO escreve nada — a app extrai automaticamente toda a informação.
- * Campos não encontrados mostram um aviso visual a indicar que deve verificar na imagem.
- * A imagem original da fatura é apresentada no topo para consulta.
+ * A imagem da fatura é apresentada IMEDIATAMENTE ao navegar para este ecrã.
+ * O processamento (OCR + extração + validação) corre em background.
+ * Quando termina, cada campo recebe um indicador visual:
+ *
+ *   ● VALID   (verde)   — valor encontrado e validado
+ *   ● SUSPECT (amarelo) — valor encontrado mas suspeito (ex: NIF com checksum errado)
+ *   ● MISSING (cinzento) — campo não encontrado — utilizador deve verificar na imagem
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiptReviewScreen(
     viewModel: ReceiptFlowViewModel,
-    onGuardado: () -> Unit
+    onGuardado: () -> Unit,
+    onScanQr: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val draft = uiState.draft ?: return
+    val draft = uiState.draft
+    val validacoes = uiState.validacoes
+
+    // Controla visibilidade do diálogo de confirmação (NIF cliente em falta)
+    var mostrarDialogoProblemas by remember { mutableStateOf(false) }
+
+    // Mostra o ecrã assim que a imagem estiver disponível, mesmo sem draft ainda
+    val imagemPath = draft?.imagemPath ?: uiState.imagemCapturadaPath ?: return
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Navegar quando guardado
+    // Navegar quando guardado com sucesso
     LaunchedEffect(uiState.savedTalaoId) {
         if (uiState.savedTalaoId != null) onGuardado()
     }
 
-    // Toast rápido quando não há QR code (só uma vez por draft)
+    // Snackbar quando processamento termina sem QR code
     LaunchedEffect(draft) {
-        if (!uiState.qrDetectado) {
-            snackbarHostState.showSnackbar("Sem QR code detetado na imagem")
+        if (draft != null && !uiState.qrDetectado) {
+            snackbarHostState.showSnackbar("Sem QR code AT — dados extraídos apenas por OCR")
         }
     }
 
+    // ─── Diálogo: resumo de campos em falta / suspeitos ─────────────────────
+    if (mostrarDialogoProblemas && draft != null) {
+        DialogoResumoProblemas(
+            validacoes  = validacoes,
+            onGuardar   = {
+                mostrarDialogoProblemas = false
+                viewModel.confirmarEGuardar()
+            },
+            onCancelar  = { mostrarDialogoProblemas = false }
+        )
+    }
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Dados da fatura") }) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "Dados da fatura",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (uiState.qrDetectado) "✓ QR code AT verificado"
+                                   else if (draft != null) "Apenas OCR — sem QR code"
+                                   else "A processar...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (uiState.qrDetectado)
+                                Color.White.copy(alpha = 0.9f)
+                            else
+                                Color(0xFFFFCC80) // laranja claro — alerta subtil
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = Color.White
+                )
+            )
+        },
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState) { data ->
                 Snackbar(snackbarData = data)
@@ -93,56 +158,161 @@ fun ReceiptReviewScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+
+            // ─── Imagem — visível IMEDIATAMENTE ───────────────────────────────
             item {
                 Spacer(modifier = Modifier.height(8.dp))
-                ImagemFatura(imagemPath = draft.imagemPath)
+                ImagemFatura(imagemPath = imagemPath)
                 Spacer(modifier = Modifier.height(8.dp))
             }
+
+            // ─── Spinner durante processamento ────────────────────────────────
+            if (draft == null) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = uiState.statusProcessamento.ifBlank { "A processar fatura..." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                return@LazyColumn
+            }
+
+            // ─── Legenda dos estados ──────────────────────────────────────────
             item {
-                Text(
-                    text = "Informação extraída automaticamente da fatura",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                LegendaEstados(temQr = uiState.qrDetectado)
                 Spacer(modifier = Modifier.height(4.dp))
             }
-            item { CampoLeitura("Empresa", draft.empresa) }
-            item { CampoLeitura("NIF", draft.nif) }
-            item { CampoLeitura("Morada", draft.morada) }
-            item { CampoLeitura("Data", draft.data?.toString()) }
-            item { CampoLeitura("Hora", draft.hora?.toString()) }
-            item { CampoLeitura("Número da fatura", draft.numeroFatura) }
-            item { CampoLeitura("IVA", draft.iva) }
-            item { CampoLeitura("Total", draft.total) }
-            item { CampoLeitura("Observações", draft.observacoes) }
+
+            // ─── Botão re-escanear QR (apenas quando QR não foi detetado) ────
+            if (!uiState.qrDetectado && !uiState.isProcessing) {
+                item {
+                    BotaoReescanearQr(onClick = onScanQr)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+            }
+
+            // ─── Fornecedor ───────────────────────────────────────────────────
+            item {
+                SecaoTitulo("Fornecedor")
+            }
+            item { CampoValidado("Empresa",          draft.empresa,       validacoes["empresa"]) }
+            item { CampoValidado("NIF do fornecedor", draft.nif,          validacoes["nif"]) }
+            item { CampoValidado("Morada",            draft.morada,       validacoes["morada"]) }
+
+            // ─── Vosso NIF ───────────────────────────────────────────────────
+            item { CampoValidado("NIF do cliente (vosso)", draft.nifCliente, validacoes["nifCliente"]) }
+
+            // ─── Documento ───────────────────────────────────────────────────
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("Produtos", style = MaterialTheme.typography.titleMedium)
+                SecaoTitulo("Documento")
             }
-            if (draft.itens.isEmpty()) {
-                item { AvisoCampoNaoEncontrado("Produtos") }
-            } else {
-                items(draft.itens) { item ->
-                    CardProduto(item)
+            item { CampoValidado("Número de fatura",   draft.numeroFatura,       validacoes["numeroFatura"]) }
+            item { CampoValidado("Data",               draft.data?.toString(),   validacoes["data"]) }
+            item { CampoValidado("Hora",               draft.hora?.toString(),   validacoes["hora"]) }
+            item { CampoValidado("Método de pagamento", draft.metodoPagamento,   validacoes["metodoPagamento"]) }
+
+            // ─── Valores ─────────────────────────────────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(4.dp))
+                SecaoTitulo("Valores")
+            }
+            item { CampoValidado("IVA (€)",    draft.iva.let { if (it.isNotBlank()) "$it €" else it }, validacoes["iva"]) }
+            item { CampoValidado("Total (€)",  draft.total.let { if (it.isNotBlank()) "$it €" else it }, validacoes["total"]) }
+
+            // ─── Produtos ────────────────────────────────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(4.dp))
+                SecaoTitulo("Produtos")
+            }
+            // Aviso de soma de produtos ≠ total (quando detetado pelo validador)
+            validacoes["produtos"]?.let { v ->
+                if (v.state == FieldState.SUSPECT) {
+                    item {
+                        CampoValidado(
+                            rotulo    = "Verificação de totais",
+                            valor     = v.hint,
+                            validacao = v
+                        )
+                    }
                 }
             }
+            if (draft.itens.isEmpty()) {
+                item {
+                    CampoValidado(
+                        rotulo = "Produtos",
+                        valor  = "",
+                        validacao = FieldValidation.missing("Nenhum produto identificado na fatura")
+                    )
+                }
+            } else {
+                items(draft.itens.mapIndexed { i, it -> Pair(i, it) }) { (idx, item) ->
+                    CardProduto(
+                        item = item,
+                        totalValidacao   = validacoes["item_${idx}_total"],
+                        taxaIvaValidacao = validacoes["item_${idx}_taxaIva"]
+                    )
+                }
+            }
+
+            // ─── Observações / erro / botão guardar ──────────────────────────
             item {
                 Spacer(modifier = Modifier.height(8.dp))
+                if (draft.observacoes.isNotBlank()) {
+                    CampoValidado("Observações", draft.observacoes, null)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 uiState.errorMessage?.let { erro ->
                     Text(
                         text = erro,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
                 Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { viewModel.confirmarEGuardar() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    onClick  = {
+                        val temProblemas = validacoes.values.any { it.state != FieldState.VALID }
+                        if (temProblemas && validacoes.isNotEmpty()) {
+                            mostrarDialogoProblemas = true
+                        } else {
+                            viewModel.confirmarEGuardar()
+                        }
+                    },
                     enabled = !uiState.isProcessing
                 ) {
-                    Text("Guardar fatura")
+                    Text(
+                        "Guardar fatura",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -150,18 +320,16 @@ fun ReceiptReviewScreen(
     }
 }
 
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 // Componentes privados
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Carrega e mostra a imagem da fatura sem dependências externas.
- * Suporta path de ficheiro local e content URI.
+ * Imagem da fatura — carrega do path local ou content URI.
  */
 @Composable
 private fun ImagemFatura(imagemPath: String) {
     val context = LocalContext.current
-
     val bitmap = remember(imagemPath) {
         runCatching {
             if (imagemPath.startsWith("content://")) {
@@ -172,20 +340,18 @@ private fun ImagemFatura(imagemPath: String) {
             }
         }.getOrNull()
     }
-
     if (bitmap != null) {
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap             = bitmap.asImageBitmap(),
             contentDescription = "Imagem da fatura",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
+            contentScale       = ContentScale.Fit,
+            modifier           = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 180.dp, max = 340.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         )
     } else {
-        // Fallback caso a imagem não seja acessível
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
@@ -197,95 +363,380 @@ private fun ImagemFatura(imagemPath: String) {
 }
 
 /**
- * Campo de leitura.
- * Se o valor estiver vazio/nulo, mostra aviso de verificação na imagem.
+ * Diálogo que lista todos os campos em falta (MISSING) e suspeitos (SUSPECT)
+ * antes de guardar. Nenhum campo é obrigatório — o utilizador decide sempre.
  */
 @Composable
-private fun CampoLeitura(rotulo: String, valor: String?) {
-    if (!valor.isNullOrBlank()) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            ),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+private fun DialogoResumoProblemas(
+    validacoes: Map<String, FieldValidation>,
+    onGuardar: () -> Unit,
+    onCancelar: () -> Unit
+) {
+    // Nomes legíveis para cada chave de validação
+    val nomesLegiveis = mapOf(
+        "empresa"         to "Nome da empresa",
+        "nif"             to "NIF do fornecedor",
+        "nifCliente"      to "NIF do destinatário (vosso NIF)",
+        "morada"          to "Morada",
+        "data"            to "Data",
+        "hora"            to "Hora",
+        "numeroFatura"    to "Número de fatura",
+        "metodoPagamento" to "Método de pagamento",
+        "iva"             to "IVA",
+        "total"           to "Total",
+        "produtos"        to "Verificação de totais de artigos"
+    )
+
+    val emFalta   = validacoes.filter { it.value.state == FieldState.MISSING }
+    val suspeitos = validacoes.filter { it.value.state == FieldState.SUSPECT }
+        .filterKeys { !it.startsWith("item_") } // Não listar erros de linha individualmente
+
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = {
+            Text(
+                text  = "Informação incompleta",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = rotulo,
-                    style = MaterialTheme.typography.labelSmall,
+                    text  = "A seguinte informação não foi encontrada ou precisa de verificação:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                if (emFalta.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text  = "Não encontrado:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = CorMissing,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        emFalta.forEach { (chave, _) ->
+                            val nome = nomesLegiveis[chave] ?: return@forEach
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = CorMissing,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(nome, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+
+                if (suspeitos.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text  = "Verificar na fatura:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = CorSuspect,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        suspeitos.forEach { (chave, validacao) ->
+                            val nome = nomesLegiveis[chave] ?: return@forEach
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = CorSuspect,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Column {
+                                    Text(nome, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                    validacao.hint?.let {
+                                        Text(it, style = MaterialTheme.typography.labelSmall, color = CorSuspect)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text  = "Pode guardar assim mesmo — pode sempre corrigir mais tarde no histórico.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onGuardar) {
+                Text("Guardar mesmo assim")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancelar) {
+                Text("Voltar a verificar")
+            }
+        }
+    )
+}
+
+/**
+ * Card de alerta + botão para ler o QR code AT.
+ * Aparece apenas quando o QR não foi detetado — destaca-se visualmente
+ * porque a ausência de QR reduz a confiança em todos os campos críticos.
+ */
+@Composable
+private fun BotaoReescanearQr(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    tint = Color(0xFFE65100),
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "QR code AT não detetado",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFE65100)
+                    )
+                    Text(
+                        text = "Os campos críticos (NIF, Total, IVA, Data) têm confiança reduzida.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFBF360C)
+                    )
+                }
+            }
+            Button(
+                onClick = onClick,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFE65100),
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.size(6.dp))
                 Text(
-                    text = valor,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    text = "Ler QR code AT com a câmara",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
-    } else {
-        AvisoCampoNaoEncontrado(rotulo)
     }
 }
 
 /**
- * Card de aviso para campos não encontrados automaticamente.
+ * Pequena legenda que explica o significado dos 3 estados visuais.
  */
 @Composable
-private fun AvisoCampoNaoEncontrado(rotulo: String) {
+private fun LegendaEstados(temQr: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
-        shape = RoundedCornerShape(8.dp),
+        colors   = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(10.dp),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LegendaItem(Icons.Default.CheckCircle, CorValid,   "Válido")
+            LegendaItem(Icons.Default.Warning,     CorSuspect, "Verificar")
+            LegendaItem(Icons.Default.Info,        CorMissing, "Não encontrado")
+        }
+    }
+}
+
+@Composable
+private fun LegendaItem(icon: androidx.compose.ui.graphics.vector.ImageVector, cor: Color, texto: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = cor, modifier = Modifier.size(14.dp))
+        Text(text = texto, style = MaterialTheme.typography.labelSmall, color = cor)
+    }
+}
+
+/**
+ * Título de secção com traço lateral em laranja.
+ */
+@Composable
+private fun SecaoTitulo(titulo: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 4.dp, height = 16.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.primary)
+        )
+        Text(
+            text  = titulo,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+/**
+ * Campo com indicador visual de validação.
+ *
+ * VALID   → fundo verde claro + ícone check
+ * SUSPECT → fundo amarelo + ícone aviso + mensagem de hint
+ * MISSING → fundo cinzento + ícone interrogação + mensagem
+ * null    → comportamento simples (sem validação — ex: observações)
+ */
+@Composable
+private fun CampoValidado(
+    rotulo: String,
+    valor: String?,
+    validacao: FieldValidation?
+) {
+    val estado = validacao?.state
+    val hint   = validacao?.hint
+
+    val corFundo: Color
+    val corIcone: Color
+    val icone: androidx.compose.ui.graphics.vector.ImageVector
+
+    when (estado) {
+        FieldState.VALID -> {
+            corFundo = CorValidFundo
+            corIcone = CorValid
+            icone    = Icons.Default.CheckCircle
+        }
+        FieldState.SUSPECT -> {
+            corFundo = CorSuspectFundo
+            corIcone = CorSuspect
+            icone    = Icons.Default.Warning
+        }
+        FieldState.MISSING, null -> {
+            corFundo = if (estado == FieldState.MISSING) CorMissingFundo
+                       else MaterialTheme.colorScheme.surfaceVariant
+            corIcone = CorMissing
+            icone    = Icons.Default.Info
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors   = CardDefaults.cardColors(containerColor = corFundo),
+        shape    = RoundedCornerShape(8.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier  = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = Color(0xFFF57F17),
-                modifier = Modifier.size(20.dp)
-            )
-            Column {
+            if (estado != null) {
+                Icon(
+                    imageVector        = icone,
+                    contentDescription = null,
+                    tint               = corIcone,
+                    modifier           = Modifier.size(18.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = rotulo,
+                    text  = rotulo,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF795548)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = "Verifique na imagem esta informação",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFF57F17),
-                    fontWeight = FontWeight.Medium
-                )
+                when (estado) {
+                    FieldState.MISSING -> Text(
+                        text       = hint ?: "Verifique na imagem original",
+                        style      = MaterialTheme.typography.bodyMedium,
+                        color      = CorMissing,
+                        fontWeight = FontWeight.Medium
+                    )
+                    FieldState.SUSPECT -> {
+                        if (!valor.isNullOrBlank()) {
+                            Text(
+                                text       = valor,
+                                style      = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        if (!hint.isNullOrBlank()) {
+                            Text(
+                                text  = hint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CorSuspect
+                            )
+                        }
+                    }
+                    else -> Text(
+                        text       = valor.orEmpty().ifBlank { "—" },
+                        style      = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Card de produto extraído pelo parser.
+ * Card de produto com indicadores de validação opcionais nas colunas numéricas.
  */
 @Composable
-private fun CardProduto(item: ItemTalaoDraft) {
+private fun CardProduto(
+    item: ItemTalaoDraft,
+    totalValidacao: FieldValidation?,
+    taxaIvaValidacao: FieldValidation?
+) {
+    val corFundo = when {
+        totalValidacao?.state == FieldState.SUSPECT   -> CorSuspectFundo
+        taxaIvaValidacao?.state == FieldState.SUSPECT -> CorSuspectFundo
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        shape = RoundedCornerShape(8.dp)
+        modifier  = Modifier.fillMaxWidth(),
+        colors    = CardDefaults.cardColors(containerColor = corFundo),
+        shape     = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text(
-                text = item.descricao.ifBlank { "(sem descrição)" },
-                style = MaterialTheme.typography.bodyLarge,
+                text       = item.descricao.ifBlank { "(sem descrição)" },
+                style      = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (item.quantidade.isNotBlank()) {
                     Text("Qtd: ${item.quantidade}", style = MaterialTheme.typography.bodySmall)
@@ -294,9 +745,46 @@ private fun CardProduto(item: ItemTalaoDraft) {
                     Text("Preço: ${item.precoUnitario} €", style = MaterialTheme.typography.bodySmall)
                 }
                 if (item.total.isNotBlank()) {
-                    Text("Total: ${item.total} €", style = MaterialTheme.typography.bodySmall)
+                    val corTotal = if (totalValidacao?.state == FieldState.SUSPECT) CorSuspect
+                                   else MaterialTheme.colorScheme.onSurface
+                    Text(
+                        text  = "Total: ${item.total} €",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = corTotal
+                    )
+                }
+            }
+            // Hint de validação do total da linha
+            totalValidacao?.hint?.let { hint ->
+                if (totalValidacao.state == FieldState.SUSPECT) {
+                    Text(
+                        text  = hint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CorSuspect
+                    )
+                }
+            }
+            // Hint de validação da taxa IVA
+            taxaIvaValidacao?.hint?.let { hint ->
+                if (taxaIvaValidacao.state == FieldState.SUSPECT) {
+                    Text(
+                        text  = hint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CorSuspect
+                    )
                 }
             }
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paleta de cores dos estados
+// ─────────────────────────────────────────────────────────────────────────────
+
+private val CorValid       = Color(0xFF2E7D32)   // verde escuro
+private val CorValidFundo  = Color(0xFFE8F5E9)   // verde claro
+private val CorSuspect     = Color(0xFFF57F17)   // laranja
+private val CorSuspectFundo = Color(0xFFFFF8E1)  // amarelo claro
+private val CorMissing     = Color(0xFF78909C)   // cinzento azulado
+private val CorMissingFundo = Color(0xFFECEFF1)  // cinzento claro
