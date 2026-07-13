@@ -38,7 +38,40 @@ data class ReceiptFlowUiState(
      * Valor = [FieldValidation] com estado VALID / SUSPECT / MISSING.
      * Vazio enquanto o processamento não terminar.
      */
-    val validacoes: Map<String, FieldValidation> = emptyMap()
+    val validacoes: Map<String, FieldValidation> = emptyMap(),
+
+    /**
+     * NIF introduzido manualmente pelo utilizador quando o QR code AT não foi detetado.
+     * Null se o QR foi lido com sucesso ou se o utilizador ainda não introduziu.
+     * Exportado para a coluna MNIF do CSV apenas quando presente.
+     */
+    val nifManual: String? = null,
+
+    /**
+     * Valor total introduzido manualmente pelo utilizador quando o QR code AT não foi detetado.
+     * Null se o QR foi lido com sucesso ou se o utilizador ainda não introduziu.
+     * Exportado para a coluna MVALOR do CSV apenas quando presente.
+     */
+    val valorManual: String? = null,
+
+    /**
+     * Controla a visibilidade do diálogo de introdução manual de NIF e valor.
+     * Ativado automaticamente quando o processamento termina sem QR code detetado.
+     */
+    val mostrarDialogoNifManual: Boolean = false,
+
+    /**
+     * True quando o utilizador confirmou o diálogo de dados manuais (NIF + valor).
+     * Sem QR, o botão "Guardar" fica bloqueado até este campo ser true.
+     */
+    val dadosManuaisConfirmados: Boolean = false,
+
+    /**
+     * Path do ficheiro de imagem final (após correcção de orientação).
+     * Guardado para que o upload Drive possa ser feito em confirmarEGuardar()
+     * nos casos sem QR, depois de MNIF/MVALOR estarem preenchidos.
+     */
+    val imagemFinalPath: String? = null
 )
 
 enum class DriveStatus { IDLE, A_ENVIAR, ENVIADO, ERRO }

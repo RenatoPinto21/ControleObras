@@ -50,7 +50,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
@@ -58,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlow
 import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -173,24 +178,36 @@ fun CameraCaptureScreen(
                     .background(Color.Black.copy(alpha = 0.55f))
             ) {
                 Text(
-                    text = "Enquadre o talão completo e mantenha-o estável",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
+                    text      = "Aponte a câmara para o talão e toque no botão laranja",
+                    color     = Color.White,
+                    style     = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                    modifier  = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
                 )
             }
         }
 
-        // ─── Painel de controlos na base ───────────────────────────────────────
+        // ─── Painel de controlos na base — industrial ──────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.75f))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0xCC161C22), Color(0xFF0F1318))
+                    )
+                )
+                .drawWithContent {
+                    drawContent()
+                    // Linha laranja no topo do painel
+                    drawLine(
+                        color       = IndustrialGlow,
+                        start       = Offset(0f, 0f),
+                        end         = Offset(size.width, 0f),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
         ) {
             Column(
                 modifier = Modifier
@@ -236,14 +253,26 @@ fun CameraCaptureScreen(
                             )
                         }
 
-                        // Botão de captura (circular, destaque — cor primária laranja)
+                        // Botão de captura — laranja industrial com glow
                         Box(
                             modifier = Modifier
                                 .size(76.dp)
+                                .drawWithContent {
+                                    // Halo exterior
+                                    if (temPermissaoCamara) {
+                                        drawCircle(
+                                            color  = IndustrialGlow.copy(alpha = 0.25f),
+                                            radius = size.minDimension / 2f + 10.dp.toPx()
+                                        )
+                                    }
+                                    drawContent()
+                                }
                                 .clip(CircleShape)
                                 .background(
-                                    if (temPermissaoCamara) MaterialTheme.colorScheme.primary
-                                    else Color.Gray
+                                    if (temPermissaoCamara)
+                                        Brush.radialGradient(listOf(Color(0xFFFF8C00), Color(0xFFE65100)))
+                                    else
+                                        Brush.radialGradient(listOf(Color.Gray, Color.DarkGray))
                                 )
                                 .clickable(enabled = temPermissaoCamara) {
                                     val captura = imageCapture ?: return@clickable

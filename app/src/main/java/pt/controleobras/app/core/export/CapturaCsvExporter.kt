@@ -23,30 +23,42 @@ import javax.inject.Inject
 class CapturaCsvExporter @Inject constructor() {
 
     fun exportar(
-        destDir: File,
-        metadata: CaptureMetadata,
-        workerData: WorkerFormData,
-        atQrData: AtQrData?,
-        draft: TalaoDraft,
-        tipo: String = "IMG"
+        destDir:     File,
+        metadata:    CaptureMetadata,
+        workerData:  WorkerFormData,
+        atQrData:    AtQrData?,
+        draft:       TalaoDraft,
+        tipo:        String  = "IMG",
+        nifManual:   String? = null,
+        valorManual: String? = null
     ): File {
         destDir.mkdirs()
         val file = File(destDir, "${metadata.fileBaseName}.csv")
 
-        val header = listOf(
+        // Colunas base (sempre presentes)
+        val colunasBase = listOf(
             "Macadress", "IDREG", "TIPO", "GPS", "FUNCN", "FUNCDESC", "FUNOBS",
             "FORNECEDOR", "NIF_FORNECEDOR", "NIF_CLIENTE", "SERIE",
             "DATA", "DATA_VENCIMENTO", "METODO_PAGAMENTO",
             "QRCODE", "TIPODOC", "TOTAL"
-        ).joinToString(";")
+        )
+
+        // Colunas extras — sempre presentes quando não houve QR code AT,
+        // mesmo que o utilizador não tenha preenchido os campos (ficam vazios no CSV).
+        val semQr = atQrData == null
+        val colunasExtras = if (semQr) listOf("MNIF", "MVALOR") else emptyList()
+
+        val header = (colunasBase + colunasExtras).joinToString(";")
 
         // Preferência para dados do QR AT quando disponíveis (mais fiáveis)
-        val data          = atQrData?.data?.toString()        ?: draft.data?.toString()          ?: ""
-        val tipoDoc       = atQrData?.tipoDocumento           ?: ""
-        val total         = atQrData?.totalComIva             ?: draft.total
-        val qrRaw         = metadata.qrCodeRaw?.replace(";", ",") ?: ""
+        val data     = atQrData?.data?.toString()            ?: draft.data?.toString() ?: ""
+        val tipoDoc  = atQrData?.tipoDocumento               ?: ""
+        val totalStr = atQrData?.totalComIva?.toString()
+                       ?: draft.total?.toString()
+                       ?: ""
+        val qrRaw    = metadata.qrCodeRaw?.replace(";", ",") ?: ""
 
-        val linha = listOf(
+        val valoresBase = listOf(
             metadata.macAddress,
             metadata.idReg,
             tipo,
@@ -63,8 +75,17 @@ class CapturaCsvExporter @Inject constructor() {
             draft.metodoPagamento.sanitizar(),
             qrRaw,
             tipoDoc,
-            total
-        ).joinToString(";")
+            totalStr
+        )
+
+        val valoresExtras = if (semQr) {
+            listOf(
+                nifManual.orEmpty().sanitizar(),
+                valorManual.orEmpty().sanitizar()
+            )
+        } else emptyList()
+
+        val linha = (valoresBase + valoresExtras).joinToString(";")
 
         file.writeText("$header\n$linha", Charsets.UTF_8)
         return file

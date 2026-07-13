@@ -27,6 +27,7 @@ import pt.controleobras.app.core.model.paraDominio
 import pt.controleobras.app.core.ocr.TextRecognizer
 import pt.controleobras.app.core.parser.ReceiptParser
 import pt.controleobras.app.core.qr.AtQrCodeParser
+import pt.controleobras.app.core.common.AppPreferences
 import pt.controleobras.app.core.qr.AtQrData
 import pt.controleobras.app.core.qr.QrCodeReader
 import pt.controleobras.app.core.validation.InvoiceFieldValidator
@@ -70,7 +71,8 @@ class ReceiptFlowViewModel @Inject constructor(
     private val deviceInfo: DeviceInfo,
     private val capturaCsvExporter: CapturaCsvExporter,
     private val driveUploader: DriveUploader,
-    private val talaoRepository: TalaoRepository
+    private val talaoRepository: TalaoRepository,
+    private val appPreferences: AppPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReceiptFlowUiState())
@@ -159,20 +161,28 @@ class ReceiptFlowViewModel @Inject constructor(
                 )
 
                 // 9. Atualizar estado — ecrã de revisão já está aberto, apenas preenche campos
+                //    Se não houver QR, ativa automaticamente o diálogo de dados manuais.
+                //    A imagem final é guardada no estado para o upload Drive posterior.
                 _uiState.update {
                     it.copy(
-                        isProcessing        = false,
-                        statusProcessamento = "",
-                        draft               = draft,
-                        validacoes          = validacoes,
-                        captureMetadata     = metadata,
-                        qrDetectado         = atQrData != null,
-                        driveStatus         = DriveStatus.IDLE
+                        isProcessing            = false,
+                        statusProcessamento     = "",
+                        draft                   = draft,
+                        validacoes              = validacoes,
+                        captureMetadata         = metadata,
+                        qrDetectado             = atQrData != null,
+                        driveStatus             = DriveStatus.IDLE,
+                        mostrarDialogoNifManual = atQrData == null,
+                        imagemFinalPath         = imagemFinal.absolutePath
                     )
                 }
 
-                // 10. Upload Drive em background (não bloqueia a UI)
-                uploadDrive(context, imagemFinal, csvFile)
+                // 10. Upload Drive — apenas quando há QR (CSV já está completo).
+                //     Sem QR, o upload é feito em confirmarEGuardar() após o utilizador
+                //     preencher NIF e valor, garantindo que MNIF e MVALOR chegam ao Drive.
+                if (atQrData != null) {
+                    uploadDrive(context, imagemFinal, csvFile)
+                }
 
             }.onFailure { erro ->
                 _uiState.update {
@@ -316,12 +326,46 @@ class ReceiptFlowViewModel @Inject constructor(
         }
     }
 
-    fun confirmarEGuardar() {
-        val draft = _uiState.value.draft ?: return
+    fun confirmarEGuardar(context: Context? = null) {
+        val estado = _uiState.value
+        val draft  = estado.draft ?: return
+
         viewModelScope.launch {
+            // Sem QR: regenerar o CSV final com MNIF e MVALOR preenchidos,
+            // depois fazer upload Drive. É aqui que os dados manuais chegam ao ficheiro.
+            if (context != null && !estado.qrDetectado) {
+                val metadata   = estado.captureMetadata
+                val workerData = estado.workerFormData
+                if (metadata != null && workerData != null) {
+                    val csvFinal = runCatching {
+                        val destDir = java.io.File(context.filesDir, "receipts").also { it.mkdirs() }
+                        capturaCsvExporter.exportar(
+                            destDir     = destDir,
+                            metadata    = metadata,
+                            workerData  = workerData,
+                            atQrData    = null,
+                            draft       = draft,
+                            nifManual   = estado.nifManual,
+                            valorManual = estado.valorManual
+                        )
+                    }.getOrNull()
+
+                    // Upload Drive com o CSV final (que já tem MNIF e MVALOR)
+                    if (csvFinal != null && estado.imagemFinalPath != null) {
+                        val imagem = java.io.File(estado.imagemFinalPath)
+                        uploadDrive(context, imagem, csvFinal)
+                    }
+                }
+            }
+
             runCatching { draft.paraDominio() }
                 .onSuccess { talao ->
                     val id = talaoRepository.guardar(talao)
+                    // Gravar feedback para mostrar no HomeScreen ao regressar
+                    val empresa = talao.empresa.ifBlank { "Fatura" }
+                    val total   = talao.total?.toString()?.let { "${it} €" } ?: ""
+                    val ts      = System.currentTimeMillis()
+                    appPreferences.ultimaFaturaFeedback = "$empresa|$total|$ts"
                     _uiState.update { it.copy(savedTalaoId = id) }
                 }
                 .onFailure { erro ->
@@ -332,5 +376,44 @@ class ReceiptFlowViewModel @Inject constructor(
 
     fun limparErro() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    // -----------------------------------------------------------------------
+    // Dados manuais (NIF + Valor) quando não há QR code AT
+    // -----------------------------------------------------------------------
+
+    /**
+     * Chamado quando o utilizador confirma os dados no diálogo de introdução manual.
+     * Guarda NIF e valor introduzidos no estado — serão exportados nas colunas
+     * MNIF e MVALOR do CSV aquando de [confirmarEGuardar].
+     */
+    /**
+     * Chamado quando o utilizador confirma NIF e valor no diálogo.
+     * Guarda os dados no estado e dispara imediatamente [confirmarEGuardar].
+     */
+    fun definirDadosManuaisEGuardar(context: Context, nif: String, valor: String) {
+        _uiState.update {
+            it.copy(
+                nifManual               = nif.trim().ifBlank { null },
+                valorManual             = valor.trim().ifBlank { null },
+                mostrarDialogoNifManual = false,
+                dadosManuaisConfirmados = true
+            )
+        }
+        confirmarEGuardar(context)
+    }
+
+    /**
+     * Reabre o diálogo de dados manuais — chamado quando o utilizador tenta
+     * guardar sem ter confirmado os dados (sem QR o preenchimento é obrigatório).
+     */
+    fun reabrirDialogoNifManual() {
+        _uiState.update { it.copy(mostrarDialogoNifManual = true) }
+    }
+
+    // Mantido para compatibilidade — não deve ser usado na UI (diálogo é obrigatório)
+    @Deprecated("Usar reabrirDialogoNifManual. Sem QR o preenchimento é obrigatório.")
+    fun fecharDialogoNifManual() {
+        _uiState.update { it.copy(mostrarDialogoNifManual = false) }
     }
 }

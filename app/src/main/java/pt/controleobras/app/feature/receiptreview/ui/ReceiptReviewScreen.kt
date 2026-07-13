@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,14 +33,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import pt.controleobras.app.core.designsystem.components.IndustrialHeader
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,9 +54,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import pt.controleobras.app.core.model.ItemTalaoDraft
 import pt.controleobras.app.core.validation.FieldState
@@ -81,8 +83,9 @@ fun ReceiptReviewScreen(
     onGuardado: () -> Unit,
     onScanQr: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val draft = uiState.draft
+    val context    = LocalContext.current
+    val uiState    by viewModel.uiState.collectAsState()
+    val draft      = uiState.draft
     val validacoes = uiState.validacoes
 
     // Controla visibilidade do diálogo de confirmação (NIF cliente em falta)
@@ -97,11 +100,14 @@ fun ReceiptReviewScreen(
         if (uiState.savedTalaoId != null) onGuardado()
     }
 
-    // Snackbar quando processamento termina sem QR code
-    LaunchedEffect(draft) {
-        if (draft != null && !uiState.qrDetectado) {
-            snackbarHostState.showSnackbar("Sem QR code AT — dados extraídos apenas por OCR")
-        }
+    // ─── Diálogo obrigatório: NIF + valor manual quando não há QR code ─────────
+    // Ao confirmar, guarda imediatamente (sem segundo clique em "Guardar fatura").
+    if (uiState.mostrarDialogoNifManual) {
+        DialogoNifManual(
+            onConfirmar = { nif, valor ->
+                viewModel.definirDadosManuaisEGuardar(context, nif, valor)
+            }
+        )
     }
 
     // ─── Diálogo: resumo de campos em falta / suspeitos ─────────────────────
@@ -110,47 +116,29 @@ fun ReceiptReviewScreen(
             validacoes  = validacoes,
             onGuardar   = {
                 mostrarDialogoProblemas = false
-                viewModel.confirmarEGuardar()
+                viewModel.confirmarEGuardar(context)
             },
             onCancelar  = { mostrarDialogoProblemas = false }
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Dados da fatura",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = if (uiState.qrDetectado) "✓ QR code AT verificado"
-                                   else if (draft != null) "Apenas OCR — sem QR code"
-                                   else "A processar...",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (uiState.qrDetectado)
-                                Color.White.copy(alpha = 0.9f)
-                            else
-                                Color(0xFFFFCC80) // laranja claro — alerta subtil
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White
-                )
-            )
-        },
-        snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState) { data ->
-                Snackbar(snackbarData = data)
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        IndustrialHeader(
+            titulo    = "Dados da Fatura",
+            subtitulo = if (uiState.qrDetectado) "✓ QR code AT verificado"
+                        else if (draft != null)   "Apenas OCR — confirme os campos"
+                        else                      "A processar...",
+            icone     = Icons.Default.QrCodeScanner
+        )
+
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = {
+                SnackbarHost(hostState = snackbarHostState) { data ->
+                    Snackbar(snackbarData = data)
+                }
             }
-        }
-    ) { innerPadding ->
+        ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -290,26 +278,36 @@ fun ReceiptReviewScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                 }
+                // Sem QR: bloqueado até o utilizador confirmar NIF e valor no diálogo
+                val semQrSemDados = !uiState.qrDetectado && !uiState.dadosManuaisConfirmados
                 Button(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
+                        containerColor = if (semQrSemDados)
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                        else
+                            MaterialTheme.colorScheme.primary
                     ),
-                    onClick  = {
-                        val temProblemas = validacoes.values.any { it.state != FieldState.VALID }
-                        if (temProblemas && validacoes.isNotEmpty()) {
-                            mostrarDialogoProblemas = true
+                    onClick = {
+                        if (semQrSemDados) {
+                            // Reabre o diálogo obrigatório
+                            viewModel.reabrirDialogoNifManual()
                         } else {
-                            viewModel.confirmarEGuardar()
+                            val temProblemas = validacoes.values.any { it.state != FieldState.VALID }
+                            if (temProblemas && validacoes.isNotEmpty()) {
+                                mostrarDialogoProblemas = true
+                            } else {
+                                viewModel.confirmarEGuardar(context)
+                            }
                         }
                     },
                     enabled = !uiState.isProcessing
                 ) {
                     Text(
-                        "Guardar fatura",
+                        text = if (semQrSemDados) "Preencher NIF e Valor →" else "Guardar fatura",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -317,7 +315,8 @@ fun ReceiptReviewScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
-    }
+        } // fim Scaffold inner
+    } // fim Column
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -494,7 +493,7 @@ private fun BotaoReescanearQr(onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2C1800)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -508,7 +507,7 @@ private fun BotaoReescanearQr(onClick: () -> Unit) {
                 Icon(
                     imageVector = Icons.Default.QrCodeScanner,
                     contentDescription = null,
-                    tint = Color(0xFFE65100),
+                    tint = Color(0xFFFF6D00),
                     modifier = Modifier.size(22.dp)
                 )
                 Column {
@@ -516,12 +515,12 @@ private fun BotaoReescanearQr(onClick: () -> Unit) {
                         text = "QR code AT não detetado",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFE65100)
+                        color = Color(0xFFFF6D00)
                     )
                     Text(
                         text = "Os campos críticos (NIF, Total, IVA, Data) têm confiança reduzida.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFBF360C)
+                        color = Color.White.copy(alpha = 0.65f)
                     )
                 }
             }
@@ -558,7 +557,7 @@ private fun LegendaEstados(temQr: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = Color(0xFF1E262F)
         ),
         shape = RoundedCornerShape(10.dp),
         elevation = CardDefaults.cardElevation(0.dp)
@@ -671,9 +670,9 @@ private fun CampoValidado(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text  = rotulo,
+                    text  = rotulo.uppercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color.White.copy(alpha = 0.45f)
                 )
                 when (estado) {
                     FieldState.MISSING -> Text(
@@ -687,7 +686,8 @@ private fun CampoValidado(
                             Text(
                                 text       = valor,
                                 style      = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.SemiBold,
+                                color      = Color.White
                             )
                         }
                         if (!hint.isNullOrBlank()) {
@@ -701,7 +701,8 @@ private fun CampoValidado(
                     else -> Text(
                         text       = valor.orEmpty().ifBlank { "—" },
                         style      = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold,
+                        color      = Color.White
                     )
                 }
             }
@@ -734,23 +735,24 @@ private fun CardProduto(
             Text(
                 text       = item.descricao.ifBlank { "(sem descrição)" },
                 style      = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold,
+                color      = Color.White
             )
             Spacer(modifier = Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (item.quantidade.isNotBlank()) {
-                    Text("Qtd: ${item.quantidade}", style = MaterialTheme.typography.bodySmall)
+                    Text("Qtd: ${item.quantidade}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.65f))
                 }
                 if (item.precoUnitario.isNotBlank()) {
-                    Text("Preço: ${item.precoUnitario} €", style = MaterialTheme.typography.bodySmall)
+                    Text("Preço: ${item.precoUnitario} €", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.65f))
                 }
                 if (item.total.isNotBlank()) {
-                    val corTotal = if (totalValidacao?.state == FieldState.SUSPECT) CorSuspect
-                                   else MaterialTheme.colorScheme.onSurface
+                    val corTotal = if (totalValidacao?.state == FieldState.SUSPECT) CorSuspect else Color(0xFFFF6D00)
                     Text(
-                        text  = "Total: ${item.total} €",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = corTotal
+                        text       = "Total: ${item.total} €",
+                        style      = MaterialTheme.typography.bodySmall,
+                        color      = corTotal,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -778,13 +780,110 @@ private fun CardProduto(
     }
 }
 
+/**
+ * Diálogo que aparece AUTOMATICAMENTE quando o processamento termina sem QR code AT.
+ *
+ * Pede ao utilizador que introduza manualmente:
+ *  - NIF do fornecedor (9 dígitos)
+ *  - Valor total do talão
+ *
+ * Estes valores são guardados em colunas separadas (MNIF, MVALOR) no CSV,
+ * distinguindo-os claramente dos valores extraídos por OCR.
+ * O utilizador pode sempre ignorar e preencher depois no ecrã de revisão.
+ */
+@Composable
+private fun DialogoNifManual(
+    onConfirmar: (nif: String, valor: String) -> Unit
+) {
+    var nif   by remember { mutableStateOf("") }
+    var valor by remember { mutableStateOf("") }
+
+    // onDismissRequest vazio — impede fechar ao clicar fora ou premir VOLTAR
+    AlertDialog(
+        onDismissRequest = { /* obrigatório — não fecha */ },
+        icon = {
+            Icon(
+                imageVector        = Icons.Default.QrCodeScanner,
+                contentDescription = null,
+                tint               = Color(0xFFE65100),
+                modifier           = Modifier.size(32.dp)
+            )
+        },
+        title = {
+            Text(
+                text       = "QR code não encontrado",
+                style      = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text  = "Sem o QR code AT, alguns dados têm menor fiabilidade. " +
+                            "Pode introduzir o NIF e o valor total da fatura para " +
+                            "registo mais seguro.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val tfColors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor    = Color(0xFFFF6D00),
+                    unfocusedBorderColor  = Color(0xFF2E3A44),
+                    focusedLabelColor     = Color(0xFFFF6D00),
+                    unfocusedLabelColor   = Color(0xFF8A9BAB),
+                    cursorColor           = Color(0xFFFF6D00),
+                    focusedTextColor      = Color.White,
+                    unfocusedTextColor    = Color.White,
+                    focusedContainerColor   = Color(0xFF1E262F),
+                    unfocusedContainerColor = Color(0xFF1E262F)
+                )
+                OutlinedTextField(
+                    value         = nif,
+                    onValueChange = { if (it.length <= 9 && it.all { c -> c.isDigit() }) nif = it },
+                    label         = { Text("NIF do fornecedor") },
+                    placeholder   = { Text("9 dígitos") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(12.dp),
+                    colors        = tfColors,
+                    modifier      = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value         = valor,
+                    onValueChange = { novo ->
+                        if (novo.all { it.isDigit() || it == '.' || it == ',' }) valor = novo
+                    },
+                    label         = { Text("Valor total (€)") },
+                    placeholder   = { Text("Ex: 47.80") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(12.dp),
+                    colors        = tfColors,
+                    modifier      = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirmar(nif, valor) },
+                colors  = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFE65100)
+                )
+            ) {
+                Text("Guardar")
+            }
+        },
+        // Sem botão de ignorar — sem QR o preenchimento é obrigatório para guardar
+    )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Paleta de cores dos estados
 // ─────────────────────────────────────────────────────────────────────────────
 
-private val CorValid       = Color(0xFF2E7D32)   // verde escuro
-private val CorValidFundo  = Color(0xFFE8F5E9)   // verde claro
-private val CorSuspect     = Color(0xFFF57F17)   // laranja
-private val CorSuspectFundo = Color(0xFFFFF8E1)  // amarelo claro
-private val CorMissing     = Color(0xFF78909C)   // cinzento azulado
-private val CorMissingFundo = Color(0xFFECEFF1)  // cinzento claro
+// Paleta dark — tema industrial (fundos escuros, texto sempre legível)
+private val CorValid        = Color(0xFF4CAF50)   // verde
+private val CorValidFundo   = Color(0xFF1B2E1B)   // verde escuríssimo
+private val CorSuspect      = Color(0xFFFFB300)   // âmbar
+private val CorSuspectFundo = Color(0xFF2C2200)   // âmbar escuríssimo
+private val CorMissing      = Color(0xFF78909C)   // cinzento azulado
+private val CorMissingFundo = Color(0xFF1E262F)   // IndustrialSurface2

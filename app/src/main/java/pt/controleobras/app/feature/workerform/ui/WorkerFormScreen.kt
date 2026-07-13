@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -23,13 +22,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +47,12 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import pt.controleobras.app.core.designsystem.components.IndustrialHeader
+import pt.controleobras.app.core.designsystem.theme.IndustrialBorder
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlow
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlowDim
+import pt.controleobras.app.core.designsystem.theme.IndustrialSteel
+import pt.controleobras.app.core.designsystem.theme.IndustrialSurface2
 import pt.controleobras.app.core.model.WorkerFormData
 import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
 
@@ -69,9 +73,19 @@ fun WorkerFormScreen(
     var funobs by remember { mutableStateOf("") }
     var tentouSubmeter by remember { mutableStateOf(false) }
 
-    val funcnErro  = tentouSubmeter && funcn.isBlank()
-    val ccnomeErro = tentouSubmeter && ccnome.isBlank()
-    val funobsErro = tentouSubmeter && funobs.isBlank()
+    // Nº Funcionário: apenas dígitos
+    val funcnFormatoInvalido = funcn.isNotBlank() && !funcn.all { it.isDigit() }
+    // Centro de Custo e Observações: letras, números, espaços e pontuação básica
+    val ccnomeFormatoInvalido = ccnome.isNotBlank() && ccnome.any {
+        !it.isLetterOrDigit() && !it.isWhitespace()
+    }
+    val funobsFormatoInvalido = funobs.isNotBlank() && funobs.any {
+        !it.isLetterOrDigit() && !it.isWhitespace() && it !in listOf('.', ',', '-', ':', '/')
+    }
+
+    val funcnErro  = tentouSubmeter && (funcn.isBlank() || funcnFormatoInvalido)
+    val ccnomeErro = tentouSubmeter && (ccnome.isBlank() || ccnomeFormatoInvalido)
+    val funobsErro = tentouSubmeter && (funobs.isBlank() || funobsFormatoInvalido)
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -94,36 +108,13 @@ fun WorkerFormScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // ─── Cabeçalho ────────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                        )
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 20.dp)
-        ) {
-            Column {
-                Text(
-                    text = "Identificação",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Text(
-                    text = "Passo 1 de 2 — quem está a registar?",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.85f)
-                )
-            }
-        }
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // ─── Cabeçalho industrial ─────────────────────────────────────────────
+        IndustrialHeader(
+            titulo    = "Identificação",
+            subtitulo = "Passo 1 de 2 — quem está a registar?",
+            icone     = Icons.Default.Person
+        )
 
         // ─── Formulário ───────────────────────────────────────────────────────
         Column(
@@ -134,90 +125,117 @@ fun WorkerFormScreen(
                 .padding(top = 20.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Aviso contextual
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                ),
-                elevation = CardDefaults.cardElevation(0.dp)
+            // Aviso contextual — tema industrial
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(IndustrialGlowDim)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment     = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Estes dados ficam associados ao registo da fatura para rastreabilidade.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
+                Icon(
+                    imageVector        = Icons.Default.Info,
+                    contentDescription = null,
+                    tint               = IndustrialGlow,
+                    modifier           = Modifier.size(18.dp)
+                )
+                Text(
+                    text  = "Estes dados ficam associados ao registo da fatura para rastreabilidade.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
             }
+
+            val textFieldColors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = IndustrialGlow,
+                unfocusedBorderColor = IndustrialBorder,
+                focusedLabelColor    = IndustrialGlow,
+                unfocusedLabelColor  = IndustrialSteel,
+                focusedLeadingIconColor   = IndustrialGlow,
+                unfocusedLeadingIconColor = IndustrialSteel,
+                cursorColor          = IndustrialGlow,
+                focusedTextColor     = Color.White,
+                unfocusedTextColor   = Color.White,
+                focusedContainerColor   = IndustrialSurface2,
+                unfocusedContainerColor = IndustrialSurface2
+            )
 
             OutlinedTextField(
                 value = funcn,
-                onValueChange = { funcn = it },
-                label = { Text("Nº Funcionário *") },
-                placeholder = { Text("Ex: 1023") },
-                isError = funcnErro,
-                supportingText = if (funcnErro) ({ Text("Campo obrigatório") }) else null,
+                onValueChange = { novo ->
+                    if (novo.all { it.isDigit() }) funcn = novo
+                },
+                label          = { Text("Nº Funcionário *") },
+                placeholder    = { Text("Ex: 1023") },
+                isError        = funcnErro,
+                supportingText = when {
+                    funcnErro && funcn.isBlank()     -> ({ Text("Campo obrigatório") })
+                    funcnErro && funcnFormatoInvalido -> ({ Text("Apenas números são permitidos") })
+                    else                              -> null
+                },
                 leadingIcon = {
-                    Icon(
-                        Icons.Default.Badge,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(Icons.Default.Badge, contentDescription = null, modifier = Modifier.size(20.dp))
                 },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
-                    capitalization = KeyboardCapitalization.Characters,
-                    imeAction = ImeAction.Next
+                    keyboardType = KeyboardType.Number,
+                    imeAction    = ImeAction.Next
                 ),
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                shape      = RoundedCornerShape(12.dp),
+                colors     = textFieldColors,
+                modifier   = Modifier.fillMaxWidth()
             )
 
             OutlinedTextField(
                 value = ccnome,
-                onValueChange = { ccnome = it },
-                label = { Text("Centro de Custo *") },
-                placeholder = { Text("Ex: Obra Lisboa Norte") },
-                isError = ccnomeErro,
-                supportingText = if (ccnomeErro) ({ Text("Campo obrigatório") }) else null,
+                onValueChange = { novo ->
+                    if (novo.all { it.isLetterOrDigit() || it.isWhitespace() }) ccnome = novo
+                },
+                label          = { Text("Centro de Custo *") },
+                placeholder    = { Text("Ex: Obra Lisboa Norte") },
+                isError        = ccnomeErro,
+                supportingText = when {
+                    ccnomeErro && ccnome.isBlank()      -> ({ Text("Campo obrigatório") })
+                    ccnomeErro && ccnomeFormatoInvalido -> ({ Text("Apenas letras, números e espaços") })
+                    else                                -> null
+                },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
+                    keyboardType   = KeyboardType.Text,
                     capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Next
+                    imeAction      = ImeAction.Next
                 ),
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                shape      = RoundedCornerShape(12.dp),
+                colors     = textFieldColors,
+                modifier   = Modifier.fillMaxWidth()
             )
 
             OutlinedTextField(
                 value = funobs,
-                onValueChange = { funobs = it },
-                label = { Text("Observações *") },
-                placeholder = { Text("Ex: Compra de material elétrico") },
-                isError = funobsErro,
-                supportingText = if (funobsErro) ({ Text("Campo obrigatório") }) else null,
+                onValueChange = { novo ->
+                    if (novo.all { it.isLetterOrDigit() || it.isWhitespace() || it in listOf('.', ',', '-', ':', '/') }) {
+                        funobs = novo
+                    }
+                },
+                label          = { Text("Observações *") },
+                placeholder    = { Text("Ex: Compra de material elétrico") },
+                isError        = funobsErro,
+                supportingText = when {
+                    funobsErro && funobs.isBlank()      -> ({ Text("Campo obrigatório") })
+                    funobsErro && funobsFormatoInvalido -> ({ Text("Apenas letras, números e pontuação básica") })
+                    else                                -> null
+                },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
+                    keyboardType   = KeyboardType.Text,
                     capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Done
+                    imeAction      = ImeAction.Done
                 ),
                 minLines = 2,
                 maxLines = 4,
-                shape = RoundedCornerShape(12.dp),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = textFieldColors,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -233,7 +251,10 @@ fun WorkerFormScreen(
                 ),
                 onClick = {
                     tentouSubmeter = true
-                    if (funcn.isNotBlank() && ccnome.isNotBlank() && funobs.isNotBlank()) {
+                    val formularioValido = funcn.isNotBlank() && !funcnFormatoInvalido &&
+                        ccnome.isNotBlank() && !ccnomeFormatoInvalido &&
+                        funobs.isNotBlank() && !funobsFormatoInvalido
+                    if (formularioValido) {
                         viewModel.definirFormulario(
                             WorkerFormData(
                                 funcn  = funcn.trim(),

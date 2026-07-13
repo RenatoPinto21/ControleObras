@@ -17,22 +17,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -45,20 +41,17 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlow
 import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Ecrã dedicado à leitura do QR code AT.
+ * Ecrã dedicado à leitura do QR code AT — tema industrial.
  *
- * Abre a câmara traseira exclusivamente para deteção de QR codes — não tira fotografia,
- * não guarda imagem. Assim que um QR code AT é detetado, chama [viewModel.processarQrEscaneado]
- * e navega automaticamente de volta para o ecrã de revisão.
- *
- * Usado quando o QR code não foi detetado na fotografia original da fatura.
+ * Câmara imersiva a ecrã completo com cantos laranja de enquadramento.
+ * Deteção automática: assim que um QR code AT é reconhecido, navega de volta.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScanScreen(
     viewModel: ReceiptFlowViewModel,
@@ -68,143 +61,139 @@ fun QrScanScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Garante que o callback só dispara uma vez mesmo com vários frames consecutivos
     val jaDetectou = remember { AtomicBoolean(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "Ler QR code AT",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onVoltar,
-                        colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-                    ) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Voltar"
-                        )
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+
+        // ─── Pré-visualização da câmara ───────────────────────────────────────
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory  = { ctx ->
+                val previewView = PreviewView(ctx)
+                val executor = Executors.newSingleThreadExecutor()
+
+                val options = BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                    .build()
+                val scanner = BarcodeScanning.getClient(options)
+
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                cameraProviderFuture.addListener({
+                    val cameraProvider = cameraProviderFuture.get()
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            )
-        }
-    ) { innerPadding ->
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+                    imageAnalysis.setAnalyzer(executor) { imageProxy: ImageProxy ->
+                        val mediaImage = imageProxy.image
+                        if (mediaImage != null && !jaDetectou.get()) {
+                            val image = InputImage.fromMediaImage(
+                                mediaImage,
+                                imageProxy.imageInfo.rotationDegrees
+                            )
+                            scanner.process(image)
+                                .addOnSuccessListener { barcodes ->
+                                    val qr = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }
+                                    if (qr != null && jaDetectou.compareAndSet(false, true)) {
+                                        viewModel.processarQrEscaneado(qr.rawValue!!)
+                                        ContextCompat.getMainExecutor(ctx).execute { onQrDetectado() }
+                                    }
+                                }
+                                .addOnCompleteListener { imageProxy.close() }
+                        } else {
+                            imageProxy.close()
+                        }
+                    }
+                    cameraProvider.unbindAll()
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        imageAnalysis
+                    )
+                }, ContextCompat.getMainExecutor(ctx))
+                previewView
+            }
+        )
+
+        // ─── Cantos laranja de enquadramento QR ───────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+                .drawWithContent {
+                    drawContent()
+                    val cornerLen = 56.dp.toPx()
+                    val stroke    = 3.5f.dp.toPx()
+                    val cx        = size.width / 2f
+                    val cy        = size.height / 2f
+                    val half      = minOf(size.width, size.height) * 0.35f
+                    val left      = cx - half
+                    val top       = cy - half
+                    val right     = cx + half
+                    val bottom    = cy + half
+                    val c         = IndustrialGlow
 
-            // ─── Pré-visualização da câmara ───────────────────────────────────
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory  = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val executor = Executors.newSingleThreadExecutor()
-
-                    // Scanner configurado apenas para QR codes
-                    val options = BarcodeScannerOptions.Builder()
-                        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-                        .build()
-                    val scanner = BarcodeScanning.getClient(options)
-
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
-                        }
-
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-
-                        imageAnalysis.setAnalyzer(executor) { imageProxy: ImageProxy ->
-                            val mediaImage = imageProxy.image
-                            if (mediaImage != null && !jaDetectou.get()) {
-                                val image = InputImage.fromMediaImage(
-                                    mediaImage,
-                                    imageProxy.imageInfo.rotationDegrees
-                                )
-                                scanner.process(image)
-                                    .addOnSuccessListener { barcodes ->
-                                        val qr = barcodes.firstOrNull {
-                                            !it.rawValue.isNullOrBlank()
-                                        }
-                                        // compareAndSet garante atomicidade: só um thread processa
-                                        if (qr != null && jaDetectou.compareAndSet(false, true)) {
-                                            viewModel.processarQrEscaneado(qr.rawValue!!)
-                                            ContextCompat.getMainExecutor(ctx).execute {
-                                                onQrDetectado()
-                                            }
-                                        }
-                                    }
-                                    .addOnCompleteListener { imageProxy.close() }
-                            } else {
-                                imageProxy.close()
-                            }
-                        }
-
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageAnalysis
-                        )
-                    }, ContextCompat.getMainExecutor(ctx))
-
-                    previewView
+                    drawLine(c, Offset(left, top + cornerLen), Offset(left, top), strokeWidth = stroke)
+                    drawLine(c, Offset(left, top), Offset(left + cornerLen, top), strokeWidth = stroke)
+                    drawLine(c, Offset(right - cornerLen, top), Offset(right, top), strokeWidth = stroke)
+                    drawLine(c, Offset(right, top), Offset(right, top + cornerLen), strokeWidth = stroke)
+                    drawLine(c, Offset(left, bottom - cornerLen), Offset(left, bottom), strokeWidth = stroke)
+                    drawLine(c, Offset(left, bottom), Offset(left + cornerLen, bottom), strokeWidth = stroke)
+                    drawLine(c, Offset(right - cornerLen, bottom), Offset(right, bottom), strokeWidth = stroke)
+                    drawLine(c, Offset(right, bottom), Offset(right, bottom - cornerLen), strokeWidth = stroke)
                 }
-            )
+        )
 
-            // ─── Painel de instrução na base ──────────────────────────────────
-            Box(
+        // ─── Painel de instrução na base — industrial ─────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0xCC161C22), Color(0xFF0F1318))
+                    )
+                )
+                .drawWithContent {
+                    drawContent()
+                    drawLine(
+                        color       = IndustrialGlow,
+                        start       = Offset(0f, 0f),
+                        end         = Offset(size.width, 0f),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                    .background(Color.Black.copy(alpha = 0.75f))
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 24.dp, vertical = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Text(
-                        text = "Aponte para o QR code AT da fatura",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = "Detetado automaticamente — não precisa de tocar no ecrã",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.65f),
-                        textAlign = TextAlign.Center
-                    )
-                }
+                Icon(
+                    imageVector        = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    tint               = IndustrialGlow,
+                    modifier           = Modifier.size(36.dp)
+                )
+                Text(
+                    text       = "Aponte para o QR code AT da fatura",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = Color.White,
+                    textAlign  = TextAlign.Center
+                )
+                Text(
+                    text      = "Detetado automaticamente — não precisa de tocar no ecrã",
+                    style     = MaterialTheme.typography.bodySmall,
+                    color     = Color.White.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }

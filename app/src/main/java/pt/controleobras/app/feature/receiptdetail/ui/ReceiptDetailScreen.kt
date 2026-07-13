@@ -14,21 +14,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -38,21 +40,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import pt.controleobras.app.core.designsystem.components.IndustrialCard
+import pt.controleobras.app.core.designsystem.components.IndustrialDivider
+import pt.controleobras.app.core.designsystem.components.IndustrialHeader
+import pt.controleobras.app.core.designsystem.components.SecaoTituloIndustrial
+import pt.controleobras.app.core.designsystem.theme.IndustrialBorder
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlow
+import pt.controleobras.app.core.designsystem.theme.IndustrialGlowDim
+import pt.controleobras.app.core.designsystem.theme.IndustrialSteel
+import pt.controleobras.app.core.designsystem.theme.IndustrialSurface
+import pt.controleobras.app.core.designsystem.theme.IndustrialSurface2
 import pt.controleobras.app.core.export.partilharExportacao
 import pt.controleobras.app.feature.receiptdetail.viewmodel.ReceiptDetailViewModel
 import java.io.File
 
 /**
- * Ecrã de detalhe de um talão guardado.
- * Mostra a imagem original da fatura no topo, seguida de todos os campos,
- * e permite exportar/partilhar os ficheiros XML e CSV gerados ao guardar.
+ * Ecrã de detalhe de um talão guardado — tema industrial.
+ * Mostra a imagem original, todos os campos extraídos pelo OCR,
+ * e permite exportar XML/CSV.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiptDetailScreen(
     onVoltar: () -> Unit,
@@ -62,123 +78,225 @@ fun ReceiptDetailScreen(
     val context = LocalContext.current
     var mostrarTextoOcr by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Detalhe da fatura") },
-                navigationIcon = {
-                    IconButton(onClick = onVoltar) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        IndustrialHeader(
+            titulo    = "Detalhe da Fatura",
+            subtitulo = talao?.empresa?.ifBlank { null },
+            icone     = Icons.Default.Description
+        )
+
         val talaoAtual = talao
         if (talaoAtual == null) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                modifier         = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = IndustrialGlow)
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier            = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding      = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp)
             ) {
+                // Imagem do talão
                 item {
-                    Spacer(modifier = Modifier.height(8.dp))
                     ImagemFatura(imagemPath = talaoAtual.imagemPath)
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
-                item { CampoDetalhe("Empresa", talaoAtual.empresa) }
-                item { CampoDetalhe("NIF", talaoAtual.nif) }
-                item { CampoDetalhe("Morada", talaoAtual.morada) }
-                item { CampoDetalhe("Data", talaoAtual.data?.toString()) }
-                item { CampoDetalhe("Hora", talaoAtual.hora?.toString()) }
-                item { CampoDetalhe("Número da fatura", talaoAtual.numeroFatura) }
+
+                // Dados da empresa
                 item {
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Produtos", style = MaterialTheme.typography.titleMedium)
-                }
-                items(talaoAtual.itens) { item ->
-                    Column {
-                        Text(item.descricao, style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "Qtd: ${item.quantidade.toPlainString()}  ·  " +
-                                "Preço: ${item.precoUnitario.toPlainString()} €  ·  " +
-                                "Total: ${item.total.toPlainString()} €",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                    SecaoTituloIndustrial("Fornecedor")
+                    Spacer(Modifier.height(8.dp))
+                    IndustrialCard {
+                        Column(
+                            modifier            = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CampoDetalhe("Empresa",  talaoAtual.empresa)
+                            CampoDetalhe("NIF",      talaoAtual.nif)
+                            CampoDetalhe("Morada",   talaoAtual.morada)
+                        }
                     }
                 }
+
+                // Dados da fatura
                 item {
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(4.dp))
+                    SecaoTituloIndustrial("Documento")
+                    Spacer(Modifier.height(8.dp))
+                    IndustrialCard {
+                        Column(
+                            modifier            = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CampoDetalhe("Nº Fatura", talaoAtual.numeroFatura)
+                            CampoDetalhe("Data",      talaoAtual.data?.toString())
+                            CampoDetalhe("Hora",      talaoAtual.hora?.toString())
+                        }
+                    }
                 }
-                item { CampoDetalhe("IVA", talaoAtual.iva?.toPlainString()) }
-                item { CampoDetalhe("Total", talaoAtual.total?.toPlainString()) }
-                item { CampoDetalhe("Observações", talaoAtual.observacoes) }
+
+                // Produtos
+                if (talaoAtual.itens.isNotEmpty()) {
+                    item {
+                        SecaoTituloIndustrial("Artigos")
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    items(talaoAtual.itens) { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(IndustrialSurface2)
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    item.descricao,
+                                    style     = MaterialTheme.typography.bodyMedium,
+                                    color     = Color.White,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "Qtd: ${item.quantidade.toPlainString()}  ·  " +
+                                    "P.Unit: ${item.precoUnitario.toPlainString()} €",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IndustrialSteel
+                                )
+                            }
+                            Text(
+                                "${item.total.toPlainString()} €",
+                                style      = MaterialTheme.typography.bodyMedium,
+                                color      = IndustrialGlow,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // Totais
                 item {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    SecaoTituloIndustrial("Totais")
+                    Spacer(Modifier.height(8.dp))
+                    IndustrialCard {
+                        Column(
+                            modifier            = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CampoDetalhe("IVA", talaoAtual.iva?.toPlainString()?.let { "$it €" })
+                            // Total em destaque
+                            if (talaoAtual.total != null) {
+                                IndustrialDivider()
+                                Row(
+                                    modifier          = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment     = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "TOTAL",
+                                        style      = MaterialTheme.typography.labelLarge,
+                                        color      = IndustrialSteel,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "${talaoAtual.total!!.toPlainString()} €",
+                                        style      = MaterialTheme.typography.titleLarge,
+                                        color      = IndustrialGlow,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            CampoDetalhe("Observações", talaoAtual.observacoes)
+                        }
+                    }
+                }
+
+                // Exportar
+                item {
+                    SecaoTituloIndustrial("Exportar")
+                    Spacer(Modifier.height(8.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier              = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
+                        Button(
                             modifier = Modifier.weight(1f),
-                            onClick = { partilharExportacao(context, talaoAtual.id, "xml") }
+                            onClick  = { partilharExportacao(context, talaoAtual.id, "xml") },
+                            colors   = ButtonDefaults.buttonColors(
+                                containerColor = IndustrialGlow,
+                                contentColor   = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("Exportar XML")
+                            Icon(Icons.Default.IosShare, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("XML", fontWeight = FontWeight.Bold)
                         }
                         OutlinedButton(
                             modifier = Modifier.weight(1f),
-                            onClick = { partilharExportacao(context, talaoAtual.id, "csv") }
+                            onClick  = { partilharExportacao(context, talaoAtual.id, "csv") },
+                            shape    = RoundedCornerShape(10.dp),
+                            border   = androidx.compose.foundation.BorderStroke(1.5.dp, IndustrialBorder)
                         ) {
-                            Text("Exportar CSV")
+                            Icon(Icons.Default.IosShare, null, modifier = Modifier.size(16.dp), tint = IndustrialSteel)
+                            Spacer(Modifier.width(6.dp))
+                            Text("CSV", color = IndustrialSteel, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
+
+                // Texto OCR (colapsável)
                 item {
-                    HorizontalDivider()
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { mostrarTextoOcr = !mostrarTextoOcr }
+                        onClick  = { mostrarTextoOcr = !mostrarTextoOcr },
+                        shape    = RoundedCornerShape(10.dp),
+                        border   = androidx.compose.foundation.BorderStroke(1.dp, IndustrialBorder)
                     ) {
+                        Icon(
+                            if (mostrarTextoOcr) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            null,
+                            tint     = IndustrialSteel,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            if (mostrarTextoOcr) "Ocultar texto reconhecido (OCR)"
-                            else "Ver texto reconhecido (OCR)"
+                            if (mostrarTextoOcr) "Ocultar texto OCR" else "Ver texto OCR",
+                            color = IndustrialSteel
                         )
                     }
                     if (mostrarTextoOcr) {
-                        Text(
-                            text = talaoAtual.textoOcr?.ifBlank { null } ?: "(sem texto reconhecido)",
-                            modifier = Modifier.padding(top = 8.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(IndustrialSurface2)
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text  = talaoAtual.textoOcr?.ifBlank { null } ?: "(sem texto reconhecido)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IndustrialSteel
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
     }
 }
 
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 // Componentes privados
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Carrega e mostra a imagem da fatura sem dependências externas.
- * Suporta path de ficheiro local e content URI.
- */
 @Composable
 private fun ImagemFatura(imagemPath: String) {
     val context = LocalContext.current
@@ -194,25 +312,48 @@ private fun ImagemFatura(imagemPath: String) {
         }.getOrNull()
     }
 
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Imagem da fatura",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 180.dp, max = 340.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    } else {
-        Spacer(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 160.dp, max = 320.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(IndustrialSurface2)
+            .drawBehind {
+                // Linha laranja inferior — imersão industrial
+                drawLine(
+                    color       = IndustrialGlow,
+                    start       = Offset(0f, size.height),
+                    end         = Offset(size.width, size.height),
+                    strokeWidth = 2.dp.toPx()
+                )
+            }
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap             = bitmap.asImageBitmap(),
+                contentDescription = "Imagem da fatura",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier         = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = null,
+                        tint     = IndustrialGlowDim,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Text("Imagem não disponível", color = IndustrialSteel, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 
@@ -220,8 +361,17 @@ private fun ImagemFatura(imagemPath: String) {
 private fun CampoDetalhe(rotulo: String, valor: String?) {
     if (!valor.isNullOrBlank()) {
         Column {
-            Text(rotulo, style = MaterialTheme.typography.labelMedium)
-            Text(valor, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text  = rotulo.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = IndustrialSteel
+            )
+            Text(
+                text      = valor,
+                style     = MaterialTheme.typography.bodyMedium,
+                color     = Color.White,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

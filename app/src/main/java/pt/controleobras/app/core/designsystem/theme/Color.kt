@@ -24,20 +24,30 @@ val OnBackgroundLight = Color(0xFF201A16)
 val ErrorLight = Color(0xFFBA1A1A)
 val OnErrorLight = Color(0xFFFFFFFF)
 
-// Dark
-val OrangePrimaryDark = Color(0xFFFFB77C)
-val OnOrangePrimaryDark = Color(0xFF552100)
+// Dark — paleta industrial (aço escuro + laranja de obra)
+val OrangePrimaryDark = Color(0xFFFF6D00)          // laranja puro da marca
+val OnOrangePrimaryDark = Color(0xFFFFFFFF)
 val OrangePrimaryContainerDark = Color(0xFF7A3900)
 val OnOrangePrimaryContainerDark = Color(0xFFFFDCC2)
-val WarmSecondaryDark = Color(0xFFDBC3B3)
-val OnWarmSecondaryDark = Color(0xFF3F2D21)
-val WarmSecondaryContainerDark = Color(0xFF574434)
-val OnWarmSecondaryContainerDark = Color(0xFFF4DED0)
-val SlateTertiaryDark = Color(0xFFB8C8D9)
-val OnSlateTertiaryDark = Color(0xFF23323F)
-val SlateTertiaryContainerDark = Color(0xFF394857)
-val OnSlateTertiaryContainerDark = Color(0xFFD4E4F6)
-val BackgroundDark = Color(0xFF18120E)
-val OnBackgroundDark = Color(0xFFEDE0D9)
-val ErrorDark = Color(0xFFFFB4AB)
-val OnErrorDark = Color(0xFF690005)
+val WarmSecondaryDark = Color(0xFFB0B8C1)          // aço claro
+val OnWarmSecondaryDark = Color(0xFF1A1F24)
+val WarmSecondaryContainerDark = Color(0xFF2A2F35)  // painel escuro
+val OnWarmSecondaryContainerDark = Color(0xFFD0D8E0)
+val SlateTertiaryDark = Color(0xFF8A9BAB)           // concreto
+val OnSlateTertiaryDark = Color(0xFF10151A)
+val SlateTertiaryContainerDark = Color(0xFF1E2530)
+val OnSlateTertiaryContainerDark = Color(0xFFCCDAE8)
+val BackgroundDark = Color(0xFF0F1318)              // fundo muito escuro (aço noturno)
+val OnBackgroundDark = Color(0xFFE8EDF2)
+val ErrorDark = Color(0xFFFF5252)
+val OnErrorDark = Color(0xFF1A0000)
+
+// ─── Tokens extra do tema industrial ────────────────────────────────────────
+// Usados diretamente nos ecrãs via IndustrialTokens
+val IndustrialSurface    = Color(0xFF161C22)        // superfície de card/painel
+val IndustrialSurface2   = Color(0xFF1E262F)        // camada elevada
+val IndustrialBorder     = Color(0xFF2E3A44)        // bordas subtis
+val IndustrialGlow       = Color(0xFFFF6D00)        // laranja glow
+val IndustrialGlowDim    = Color(0x44FF6D00)        // glow transparente
+val IndustrialAccentText = Color(0xFFFFCC80)        // laranja claro para texto secundário
+val IndustrialSteel      = Color(0xFF8A9BAB)        // texto aço

@@ -34,9 +34,19 @@ class AppPreferences @Inject constructor(
         get() = prefs.getLong(CHAVE_LLM_DOWNLOAD_ID, -1L)
         set(value) = prefs.edit { putLong(CHAVE_LLM_DOWNLOAD_ID, value) }
 
+    /**
+     * Feedback da última fatura guardada — mostrado no HomeScreen ao regressar.
+     * Formato: "Empresa|total|timestamp_ms". Null = sem fatura recente.
+     * Limpo depois de mostrado.
+     */
+    var ultimaFaturaFeedback: String?
+        get() = prefs.getString(CHAVE_ULTIMA_FATURA, null)
+        set(value) = prefs.edit { putString(CHAVE_ULTIMA_FATURA, value) }
+
     private companion object {
         const val CHAVE_BOAS_VINDAS      = "ja_viu_boas_vindas"
         const val CHAVE_DRIVE_FOLDER     = "drive_folder_uri"
         const val CHAVE_LLM_DOWNLOAD_ID  = "llm_download_id"
+        const val CHAVE_ULTIMA_FATURA    = "ultima_fatura_feedback"
     }
 }

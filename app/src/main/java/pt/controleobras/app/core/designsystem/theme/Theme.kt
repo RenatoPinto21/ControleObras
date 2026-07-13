@@ -7,24 +7,27 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
 private val DarkColorScheme = darkColorScheme(
-    primary = OrangePrimaryDark,
-    onPrimary = OnOrangePrimaryDark,
-    primaryContainer = OrangePrimaryContainerDark,
-    onPrimaryContainer = OnOrangePrimaryContainerDark,
-    secondary = WarmSecondaryDark,
-    onSecondary = OnWarmSecondaryDark,
-    secondaryContainer = WarmSecondaryContainerDark,
+    primary              = OrangePrimaryDark,
+    onPrimary            = OnOrangePrimaryDark,
+    primaryContainer     = OrangePrimaryContainerDark,
+    onPrimaryContainer   = OnOrangePrimaryContainerDark,
+    secondary            = WarmSecondaryDark,
+    onSecondary          = OnWarmSecondaryDark,
+    secondaryContainer   = WarmSecondaryContainerDark,
     onSecondaryContainer = OnWarmSecondaryContainerDark,
-    tertiary = SlateTertiaryDark,
-    onTertiary = OnSlateTertiaryDark,
-    tertiaryContainer = SlateTertiaryContainerDark,
-    onTertiaryContainer = OnSlateTertiaryContainerDark,
-    background = BackgroundDark,
-    onBackground = OnBackgroundDark,
-    surface = BackgroundDark,
-    onSurface = OnBackgroundDark,
-    error = ErrorDark,
-    onError = OnErrorDark
+    tertiary             = SlateTertiaryDark,
+    onTertiary           = OnSlateTertiaryDark,
+    tertiaryContainer    = SlateTertiaryContainerDark,
+    onTertiaryContainer  = OnSlateTertiaryContainerDark,
+    background           = BackgroundDark,
+    onBackground         = OnBackgroundDark,
+    surface              = IndustrialSurface,
+    surfaceVariant       = IndustrialSurface2,
+    onSurface            = OnBackgroundDark,
+    onSurfaceVariant     = IndustrialSteel,
+    outline              = IndustrialBorder,
+    error                = ErrorDark,
+    onError              = OnErrorDark
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -54,16 +57,19 @@ private val LightColorScheme = lightColorScheme(
  * a paleta da marca em vez de seguir o wallpaper do dispositivo, para
  * garantir identidade visual consistente entre tablets da empresa.
  */
+/**
+ * Tema industrial da marca — SEMPRE escuro.
+ * A identidade visual de obra/aço/laranja é exclusivamente dark.
+ * O parâmetro darkTheme é mantido por compatibilidade mas ignorado.
+ */
 @Composable
 fun ControleObrasTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    @Suppress("UNUSED_PARAMETER") darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-
     MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
+        colorScheme = DarkColorScheme,
+        typography  = Typography,
+        content     = content
     )
 }

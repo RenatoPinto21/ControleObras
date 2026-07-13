@@ -4,6 +4,111 @@ Registo cronológico de todas as alterações feitas ao projeto, por fase do `DE
 
 ---
 
+## Sessão 2026-07-13 (parte 3) — Polish anti-IA: refinamento profissional do design
+
+**Objetivo:** eliminar padrões visuais "cara de IA" e aproximar a app de produtos industriais profissionais (Fieldwire, Procore, apps de campo).
+
+### Padrões eliminados
+
+| Padrão | Localização | Substituição |
+|---|---|---|
+| Botão scan 200dp/160dp com gradient radial triplo + pulse exagerado | `HomeScreen` | Botão 80dp simples + anel subtil + fundo sólido laranja |
+| Logo NavRail com ícone `QrCodeScanner` + `linearGradient` | `NavHost` | Iniciais "CO" em fundo laranja sólido |
+| Ícone SCAN igual ao logo (`QrCodeScanner`) | `NavHost` | `CameraAlt` para SCAN |
+| `Brush.verticalGradient` no IndustrialHeader (invisível, desnecessário) | `IndustrialComponents` | Cor sólida `#111820` |
+| `Brush.horizontalGradient` no IndustrialCard | `IndustrialComponents` | `IndustrialSurface2` sólido |
+| `Brush.horizontalGradient` nos cards da lista | `ReceiptListScreen` | `IndustrialSurface2` sólido |
+| `letterSpacing = 1.5.sp` + `uppercase()` + `FontWeight.Bold` em `SecaoTituloIndustrial` | `IndustrialComponents` | `FontWeight.SemiBold`, cor `IndustrialSteel`, sem uppercase |
+| Subtítulo do header em `IndustrialGlow.copy(alpha)` | `IndustrialComponents` | `IndustrialSteel` |
+| `titleLarge + FontWeight.Bold` no header | `IndustrialComponents` | `titleMedium + FontWeight.SemiBold` |
+| `FECHAR`/`VOLTAR`/`INÍCIO` all-caps Bold na bottom bar | `NavHost` | Capitalized + `FontWeight.Medium` |
+| `ExtraBold + letterSpacing` no HomeHeader | `HomeScreen` | `FontWeight.Bold` sem letterSpacing |
+| Imports órfãos: `Brush`, `scale`, `TextAlign`, `Warning` | vários | Removidos |
+
+### Ficheiros alterados
+
+- `feature/home/ui/HomeScreen.kt` — reescrito completamente: header limpo com marca lateral, botão scan sóbrio com anel subtil, cards sem gradiente, serviços em painel estilo "control panel"
+- `core/navigation/ControleObrasNavHost.kt` — logo "CO" em sólido, ícone SCAN corrigido, labels bottom bar normalizadas
+- `core/designsystem/components/IndustrialComponents.kt` — header sem gradiente, card sem gradiente, SecaoTitulo sem all-caps/letterSpacing
+- `feature/receiptlist/ui/ReceiptListScreen.kt` — cards sem gradiente horizontal
+- `feature/workerform/ui/WorkerFormScreen.kt` — import Brush órfão removido
+
+---
+
+## Sessão 2026-07-13 (parte 2) — Redesign visual industrial completo
+
+### Tema industrial — todos os ecrãs
+
+**Conceito:** app imersiva de obra com paleta aço-escuro (`#161C22`) + laranja de segurança (`#FF6D00`).
+Inspirado nas imagens de referência do utilizador: dashboard tablet escuro, cantos de câmara laranja, textura aço/betão.
+
+**Ficheiros criados/alterados:**
+
+- `core/designsystem/theme/Color.kt` — tokens industriais: `IndustrialSurface`, `IndustrialSurface2`, `IndustrialBorder`, `IndustrialGlow`, `IndustrialGlowDim`, `IndustrialSteel`, `IndustrialAccentText`
+- `core/designsystem/theme/Theme.kt` — tema forçado sempre-dark; `ControleObrasTheme` ignora parâmetro `darkTheme`
+- `core/designsystem/components/IndustrialComponents.kt` (novo) — componentes partilhados: `IndustrialHeader`, `IndustrialCard`, `IndustrialDivider`, `SecaoTituloIndustrial`
+- `core/navigation/ControleObrasNavHost.kt` — layout adaptativo:
+  - **Portrait**: `BarraNavegacaoIndustrial` (bottom bar escura com linha laranja no topo, botões VOLTAR/INÍCIO)
+  - **Landscape**: `NavigationRailIndustrial` (rail lateral 80dp, logo laranja no topo, itens INÍCIO/SCAN/REGISTO, VOLTAR no fundo, linha laranja na borda direita)
+  - Deteção via `LocalConfiguration.current.orientation`
+- `feature/home/ui/HomeScreen.kt` — reescrito: header com ícone, botão de scan animado (pulse + glow radial), card histórico industrial, indicadores de estado
+- `feature/workerform/ui/WorkerFormScreen.kt` — `IndustrialHeader`, aviso com `IndustrialGlowDim`, `OutlinedTextFieldDefaults.colors()` com borda/foco laranja
+- `feature/receiptcapture/ui/CameraCaptureScreen.kt` — cantos de enquadramento laranja (`drawWithContent`), botão de captura com halo glow, painel base com gradiente escuro + linha laranja
+- `feature/qrscan/ui/QrScanScreen.kt` — câmara imersiva, cantos de enquadramento quadrado centrado, painel base industrial; removido `TopAppBar`/`Scaffold`
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt` — `IndustrialHeader` substitui `TopAppBar`
+- `feature/receiptlist/ui/ReceiptListScreen.kt` — cards industriais com borda esquerda laranja, inicial da empresa, totais em laranja, ícone exportar
+- `feature/receiptdetail/ui/ReceiptDetailScreen.kt` — `IndustrialCard` para cada secção, `SecaoTituloIndustrial`, total em laranja em destaque, OCR colapsável com fundo escuro
+
+---
+
+## Sessão 2026-07-13 — Validação de inputs, navegação persistente e diálogo NIF/Valor manual
+
+### 1. Validação de formato nos campos do WorkerFormScreen
+
+**Ficheiro alterado:** `feature/workerform/ui/WorkerFormScreen.kt`
+
+- Nº Funcionário: `onValueChange` filtra — apenas dígitos são aceites; `KeyboardType.Number`
+- Centro de Custo: filtra — apenas letras, números e espaços; `KeyboardCapitalization.Sentences`
+- Observações: filtra — letras, números, espaços e pontuação básica (`. , - : /`)
+- Mensagens de erro discriminadas: "Campo obrigatório" vs "Apenas números são permitidos"
+- Condição de submit atualizada para incluir validação de formato antes de avançar
+
+### 2. Barra de navegação persistente — INÍCIO + VOLTAR
+
+**Ficheiros alterados:** `core/navigation/ControleObrasNavHost.kt`
+
+- Novo `Scaffold` raiz envolve o `NavHost` inteiro com um `BottomAppBar`
+- `BarraNavegacaoPersistente` composable (privado) com dois botões grandes (52 dp):
+  - **VOLTAR** (OutlinedButton): `popBackStack()` — em Home exibe "FECHAR APP" e chama `activity.finish()`
+  - **INÍCIO** (Button laranja): navega para Home limpando backstack; desabilitado quando já em Home
+- Usa `currentBackStackEntryAsState()` para detetar rota ativa
+- `LocalActivity` para fechar a app desde o Home
+- UX para utilizadores não-tech: botões grandes, ícones, labels claras em português
+- Aplica-se AUTOMATICAMENTE a todos os ecrãs — sem repetição de código nos ecrãs individuais
+
+**Novos imports:** `BorderStroke`, `BottomAppBar`, `OutlinedButton`, `LocalActivity`, `currentBackStackEntryAsState`, `Icons.AutoMirrored.Filled.ArrowBack`, `Icons.Default.Home`
+
+### 3. Diálogo automático de NIF e Valor manual quando sem QR code AT
+
+**Ficheiros alterados:**
+- `feature/receiptflow/viewmodel/ReceiptFlowUiState.kt` — novos campos: `nifManual: String?`, `valorManual: String?`, `mostrarDialogoNifManual: Boolean`
+- `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt`:
+  - `processarImagem()`: ativa `mostrarDialogoNifManual = true` quando `atQrData == null`
+  - Novo método `definirDadosManuais(nif, valor)`: guarda dados e fecha diálogo
+  - Novo método `fecharDialogoNifManual()`: fecha diálogo sem guardar
+  - `confirmarEGuardar(context?)`: re-exporta CSV com MNIF/MVALOR quando há dados manuais
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt`:
+  - Novo composable privado `DialogoNifManual`: diálogo com campos NIF (máx 9 dígitos) e Valor (decimal)
+  - Diálogo ativado automaticamente por `uiState.mostrarDialogoNifManual`
+  - `confirmarEGuardar(context)` agora recebe `LocalContext`
+  - Removido `LaunchedEffect` do Snackbar "sem QR" (substituído pelo diálogo)
+- `core/export/CapturaCsvExporter.kt`:
+  - Novos parâmetros opcionais `nifManual: String?` e `valorManual: String?`
+  - Colunas `MNIF` e `MVALOR` adicionadas ao header e linha **apenas** quando não há QR e os valores existem
+  - Registos com QR nunca contêm estas colunas extras
+
+---
+
 ## Fase 1 — Fundação de arquitetura (2026-07-07)
 
 Objetivo: preparar DI (Hilt), navegação (Navigation Compose) e a estrutura de pacotes definida em `PROJECT_ARCHITECTURE.md`, sem ainda existir lógica de negócio.

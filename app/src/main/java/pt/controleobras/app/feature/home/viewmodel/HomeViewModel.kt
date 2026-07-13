@@ -16,6 +16,11 @@ import pt.controleobras.app.core.llm.LlmModelDownloader
 import pt.controleobras.app.core.llm.LlmModelManager
 import javax.inject.Inject
 
+data class FeedbackFatura(
+    val empresa: String,
+    val total: String
+)
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val appPreferences: AppPreferences,
@@ -28,6 +33,10 @@ class HomeViewModel @Inject constructor(
 
     private val _driveConfigurado = MutableStateFlow(!appPreferences.driveFolderUri.isNullOrBlank())
     val driveConfigurado: StateFlow<Boolean> = _driveConfigurado.asStateFlow()
+
+    /** Feedback da última fatura guardada — null se não houver ou já foi mostrado. */
+    private val _feedbackUltimaFatura = MutableStateFlow<FeedbackFatura?>(null)
+    val feedbackUltimaFatura: StateFlow<FeedbackFatura?> = _feedbackUltimaFatura.asStateFlow()
 
     private val _modeloIaDisponivel = MutableStateFlow(llmModelManager.modelExists())
     val modeloIaDisponivel: StateFlow<Boolean> = _modeloIaDisponivel.asStateFlow()
@@ -66,6 +75,26 @@ class HomeViewModel @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
     // Modelo IA — verificação
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Chamado ao regressar ao HomeScreen — lê o feedback da última fatura e limpa-o.
+     * Deve ser chamado no onResume para mostrar o banner apenas uma vez.
+     */
+    fun verificarFeedbackFatura() {
+        val raw = appPreferences.ultimaFaturaFeedback ?: return
+        appPreferences.ultimaFaturaFeedback = null   // limpar — só mostra uma vez
+        val partes = raw.split("|")
+        if (partes.size >= 2) {
+            _feedbackUltimaFatura.value = FeedbackFatura(
+                empresa = partes[0],
+                total   = partes[1]
+            )
+        }
+    }
+
+    fun fecharFeedbackFatura() {
+        _feedbackUltimaFatura.value = null
+    }
 
     /** Chamado quando o utilizador volta ao HomeScreen (onResume). */
     fun verificarModeloIa() {
