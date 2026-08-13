@@ -16,7 +16,7 @@ data class ReceiptFlowUiState(
     /** Dados preenchidos pelo funcionário no formulário inicial. */
     val workerFormData: WorkerFormData? = null,
 
-    /** Metadados técnicos da captura (MAC, IDREG, GPS, QR raw). */
+    /** Metadados técnicos da captura (SERIAL, IDREG, GPS, QR raw). */
     val captureMetadata: CaptureMetadata? = null,
 
     /** True se o QR code AT foi detetado na imagem. */

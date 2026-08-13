@@ -27,13 +27,21 @@ android {
     buildTypes {
         release {
             optimization {
-                enable = false
+                enable = true
             }
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    packaging {
+        resources {
+            excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/LICENSE.md"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/LICENSE"
+        }
     }
     buildFeatures {
         compose = true
@@ -68,6 +76,12 @@ dependencies {
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.play.services.location)
     implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.mariadb.connector)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

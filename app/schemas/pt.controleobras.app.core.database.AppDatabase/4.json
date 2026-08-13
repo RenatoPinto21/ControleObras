@@ -1,0 +1,150 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "65af835b6c2a0b8d7b31f4001a892462",
+    "entities": [
+      {
+        "tableName": "talao",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `empresa` TEXT NOT NULL, `nif` TEXT, `nifCliente` TEXT, `morada` TEXT, `data` TEXT, `hora` TEXT, `serie` TEXT, `numeroFatura` TEXT, `dataVencimento` TEXT, `metodoPagamento` TEXT, `itens` TEXT NOT NULL, `iva` TEXT, `total` TEXT, `observacoes` TEXT, `imagemPath` TEXT NOT NULL, `criadoEm` TEXT NOT NULL, `textoOcr` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "empresa",
+            "columnName": "empresa",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nif",
+            "columnName": "nif",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nifCliente",
+            "columnName": "nifCliente",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "morada",
+            "columnName": "morada",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "data",
+            "columnName": "data",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hora",
+            "columnName": "hora",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serie",
+            "columnName": "serie",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "numeroFatura",
+            "columnName": "numeroFatura",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dataVencimento",
+            "columnName": "dataVencimento",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "metodoPagamento",
+            "columnName": "metodoPagamento",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "itens",
+            "columnName": "itens",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "iva",
+            "columnName": "iva",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "total",
+            "columnName": "total",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "observacoes",
+            "columnName": "observacoes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "imagemPath",
+            "columnName": "imagemPath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "criadoEm",
+            "columnName": "criadoEm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "textoOcr",
+            "columnName": "textoOcr",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "centro_custo",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`fref` TEXT NOT NULL, `nmfref` TEXT NOT NULL, `agnome` TEXT NOT NULL, PRIMARY KEY(`fref`))",
+        "fields": [
+          {
+            "fieldPath": "fref",
+            "columnName": "fref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nmfref",
+            "columnName": "nmfref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agnome",
+            "columnName": "agnome",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "fref"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '65af835b6c2a0b8d7b31f4001a892462')"
+    ]
+  }
+}

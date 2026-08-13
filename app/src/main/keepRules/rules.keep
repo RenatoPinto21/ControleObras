@@ -1,12 +1,38 @@
-# Add project specific R8 rules here.
-# AGP will combine all keep rule files in src/main/keepRules to pass to R8
-#
-# For more details, see
-#   https://d.android.com/r/tools/r8/keep-rules
+# ── R8 / ProGuard — Controle Obras ──────────────────────────────────────────
+# AGP combina todos os ficheiros em src/main/keepRules automaticamente.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ── MariaDB JDBC driver ────────────────────────────────────────────────────
+# O driver é carregado via Class.forName() — R8 não consegue detetar o uso.
+-keep class org.mariadb.jdbc.** { *; }
+-dontwarn org.mariadb.jdbc.**
+
+# ── Room (entidades + DAOs) ────────────────────────────────────────────────
+-keep class pt.controleobras.app.core.database.entity.** { *; }
+-keep class pt.controleobras.app.core.database.dao.** { *; }
+-keep class pt.controleobras.app.core.database.converter.** { *; }
+
+# ── Hilt (gerado por KSP) ─────────────────────────────────────────────────
+-keep class dagger.hilt.** { *; }
+-keep class * extends dagger.hilt.android.internal.managers.ViewComponentManager$FragmentContextWrapper { *; }
+
+# ── kotlinx.serialization (usado nos TypeConverters do Room) ───────────────
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class pt.controleobras.app.**$$serializer { *; }
+-keepclassmembers class pt.controleobras.app.** {
+    *** Companion;
+}
+-keepclasseswithmembers class pt.controleobras.app.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# ── ML Kit / MediaPipe ─────────────────────────────────────────────────────
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+
+# ── Modelo de dados (data classes usadas em reflexão/serialização) ─────────
+-keep class pt.controleobras.app.core.model.** { *; }
+-keep class pt.controleobras.app.core.config.AppConfig { *; }
+
+# ── Compose (já tratado pelo plugin kotlin-compose, mas por segurança) ─────
+-dontwarn androidx.compose.**

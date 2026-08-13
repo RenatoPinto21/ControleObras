@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import pt.controleobras.app.core.designsystem.components.IndustrialHeader
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -81,7 +83,8 @@ import pt.controleobras.app.feature.receiptflow.viewmodel.ReceiptFlowViewModel
 fun ReceiptReviewScreen(
     viewModel: ReceiptFlowViewModel,
     onGuardado: () -> Unit,
-    onScanQr: () -> Unit
+    onScanQr: () -> Unit,
+    onVoltar: () -> Unit = {}
 ) {
     val context    = LocalContext.current
     val uiState    by viewModel.uiState.collectAsState()
@@ -91,13 +94,67 @@ fun ReceiptReviewScreen(
     // Controla visibilidade do diálogo de confirmação (NIF cliente em falta)
     var mostrarDialogoProblemas by remember { mutableStateOf(false) }
 
+    // Controla visibilidade do diálogo de confirmação ao carregar "Voltar"
+    var mostrarDialogoDescartar by remember { mutableStateOf(false) }
+
+    // ── BackHandler — protege contra perda de dados ao carregar "Voltar" ─────
+    // Num tablet em obra, o gesto de swipe-back ou o botão de hardware podem
+    // ser acionados acidentalmente. Sem esta proteção, todos os dados do OCR
+    // e da revisão seriam perdidos sem aviso.
+    BackHandler(enabled = true) {
+        mostrarDialogoDescartar = true
+    }
+
     // Mostra o ecrã assim que a imagem estiver disponível, mesmo sem draft ainda
     val imagemPath = draft?.imagemPath ?: uiState.imagemCapturadaPath ?: return
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Navegar quando guardado com sucesso
+    // Navegar quando guardado com sucesso — com feedback sensorial
+    // A vibração + bip confirma ao utilizador que o talão foi guardado,
+    // mesmo que esteja de luvas ou em ambiente ruidoso na obra.
     LaunchedEffect(uiState.savedTalaoId) {
-        if (uiState.savedTalaoId != null) onGuardado()
+        if (uiState.savedTalaoId != null) {
+            pt.controleobras.app.core.common.FeedbackUtil.sucessoAoGuardar(context)
+            onGuardado()
+        }
+    }
+
+    // ─── Diálogo de confirmação ao carregar "Voltar" ───────────────────────────
+    if (mostrarDialogoDescartar) {
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoDescartar = false },
+            title = {
+                Text(
+                    text       = "Descartar alterações?",
+                    style      = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text  = "Os dados extraídos desta fatura serão perdidos. Tem a certeza que pretende sair?",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        mostrarDialogoDescartar = false
+                        onVoltar()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Descartar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoDescartar = false }) {
+                    Text("Continuar a editar")
+                }
+            }
+        )
     }
 
     // ─── Diálogo obrigatório: NIF + valor manual quando não há QR code ─────────
@@ -246,7 +303,7 @@ fun ReceiptReviewScreen(
                 }
             }
             if (draft.itens.isEmpty()) {
-                item {
+                item  {
                     CampoValidado(
                         rotulo = "Produtos",
                         valor  = "",
@@ -284,7 +341,7 @@ fun ReceiptReviewScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (semQrSemDados)
                             MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
@@ -329,6 +386,8 @@ fun ReceiptReviewScreen(
 @Composable
 private fun ImagemFatura(imagemPath: String) {
     val context = LocalContext.current
+    var mostrarFullscreen by remember { mutableStateOf(false) }
+
     val bitmap = remember(imagemPath) {
         runCatching {
             if (imagemPath.startsWith("content://")) {
@@ -339,23 +398,54 @@ private fun ImagemFatura(imagemPath: String) {
             }
         }.getOrNull()
     }
+
+    // Visualizador fullscreen com pinch-to-zoom
+    if (mostrarFullscreen && bitmap != null) {
+        pt.controleobras.app.core.designsystem.components.FullscreenImageViewer(
+            bitmap   = bitmap,
+            onFechar = { mostrarFullscreen = false }
+        )
+    }
+
     if (bitmap != null) {
-        Image(
-            bitmap             = bitmap.asImageBitmap(),
-            contentDescription = "Imagem da fatura",
-            contentScale       = ContentScale.Fit,
-            modifier           = Modifier
+        Box(
+            modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 180.dp, max = 340.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
+                .clickable { mostrarFullscreen = true }
+        ) {
+            Image(
+                bitmap             = bitmap.asImageBitmap(),
+                contentDescription = "Imagem da fatura — toque para ampliar",
+                contentScale       = ContentScale.Fit,
+                modifier           = Modifier.fillMaxSize()
+            )
+            // Indicador de zoom
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        RoundedCornerShape(4.dp)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text  = "Toque para ampliar",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            }
+        }
     } else {
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(80.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         )
     }
@@ -492,7 +582,7 @@ private fun DialogoResumoProblemas(
 private fun BotaoReescanearQr(onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2C1800)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -559,7 +649,7 @@ private fun LegendaEstados(temQr: Boolean) {
         colors   = CardDefaults.cardColors(
             containerColor = Color(0xFF1E262F)
         ),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
@@ -818,10 +908,15 @@ private fun DialogoNifManual(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Explicação clara do porquê deste diálogo:
+                // O QR code AT contém NIF e valor assinados digitalmente.
+                // Sem ele, o OCR pode errar — pedimos confirmação manual.
                 Text(
-                    text  = "Sem o QR code AT, alguns dados têm menor fiabilidade. " +
-                            "Pode introduzir o NIF e o valor total da fatura para " +
-                            "registo mais seguro.",
+                    text  = "Esta fatura não tem QR code AT (código obrigatório " +
+                            "nas faturas portuguesas desde 2022).\n\n" +
+                            "Sem o QR, o NIF e o valor foram lidos por OCR e " +
+                            "podem conter erros. Confirme ou corrija os valores abaixo " +
+                            "para garantir um registo correto.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -843,7 +938,7 @@ private fun DialogoNifManual(
                     placeholder   = { Text("9 dígitos") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine    = true,
-                    shape         = RoundedCornerShape(12.dp),
+                    shape         = RoundedCornerShape(8.dp),
                     colors        = tfColors,
                     modifier      = Modifier.fillMaxWidth()
                 )
@@ -856,7 +951,7 @@ private fun DialogoNifManual(
                     placeholder   = { Text("Ex: 47.80") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine    = true,
-                    shape         = RoundedCornerShape(12.dp),
+                    shape         = RoundedCornerShape(8.dp),
                     colors        = tfColors,
                     modifier      = Modifier.fillMaxWidth()
                 )

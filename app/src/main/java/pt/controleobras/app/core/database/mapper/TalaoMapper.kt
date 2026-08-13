@@ -24,7 +24,11 @@ fun TalaoEntity.toDomain(): Talao = Talao(
     observacoes     = observacoes,
     imagemPath      = imagemPath,
     criadoEm        = criadoEm,
-    textoOcr        = textoOcr
+    textoOcr        = textoOcr,
+    funcn           = funcn,
+    fref            = fref,
+    nmfref          = nmfref,
+    agnome          = agnome
 )
 
 fun Talao.toEntity(): TalaoEntity = TalaoEntity(
@@ -45,7 +49,11 @@ fun Talao.toEntity(): TalaoEntity = TalaoEntity(
     observacoes     = observacoes,
     imagemPath      = imagemPath,
     criadoEm        = criadoEm,
-    textoOcr        = textoOcr
+    textoOcr        = textoOcr,
+    funcn           = funcn,
+    fref            = fref,
+    nmfref          = nmfref,
+    agnome          = agnome
 )
 
 fun ItemTalaoDto.toDomain(): ItemTalao = ItemTalao(

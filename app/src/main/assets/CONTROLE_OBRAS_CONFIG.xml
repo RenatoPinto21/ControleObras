@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ZEBRA>
+    <ZEID>CO001</ZEID>
+    <VERSAO>01</VERSAO>
+    <EMPRESA>
+        <Id>RETAIL CONCEPT SA</Id>
+        <NIF>508067057</NIF>
+        <BD>
+            <SERVIDOR>1c8ri0VphGYxicUYALrKEiQtbeUL5xFpuuhg9wspA9HSdGbtH6vzXHGY/PeEv0t7</SERVIDOR>
+            <LOGIN>YdCCIA1HpbZ51332jpgScg==</LOGIN>
+            <PASSWORD>/Phqln+hS+APbju2ZtMfKQ==</PASSWORD>
+            <PORTA>BUeTnC5GtOMOnpA5Uuu2Fw==</PORTA>
+            <BASEDADOS>tLibGMy5hca7JRAhvIkXfA==</BASEDADOS>
+        </BD>
+        <TIPOLIGACAO>
+            <ONLINE>1</ONLINE>
+            <TXT>0</TXT>
+        </TIPOLIGACAO>
+    </EMPRESA>
+</ZEBRA>

@@ -4,6 +4,370 @@ Registo cronológico de todas as alterações feitas ao projeto, por fase do `DE
 
 ---
 
+## Sessão 2026-08-13 — Accordion empresas: correção mapeamento + 7 melhorias UX
+
+**Objetivo:** Corrigir mapeamento invertido empresa/funcionário no accordion de presenças e implementar 7 melhorias UX selecionadas pelo utilizador.
+
+### Correção crítica — mapeamento PHC invertido
+
+O accordion mostrava nomes de funcionários como cabeçalhos e empresas como filhos. Causa: no PHC SUBFUNC, `NOME` = entidade/empresa e `DESIGN` = nome da pessoa (oposto ao assumido).
+
+**Fix:**
+- `groupBy` mudou de `it.designacao` para `it.nome`
+- `FuncionarioItem` mostra `funcionario.designacao.ifBlank { funcionario.nome }`
+
+### 7 melhorias implementadas
+
+| Melhoria | Descrição |
+|---|---|
+| Contador empresas no CC header | Badge "X emp." no `CentroCustoHeader` |
+| Expandir/colapsar todas | Link toggle após barra de pesquisa |
+| Ordenar empresas por seleção | `compareByDescending` nº selecionados + `thenBy` alfabético |
+| Pesquisa auto-expande | `LaunchedEffect` expande todas as empresas com resultados |
+| Resumo antes de registar | `ResumoRegistoDialog` — AlertDialog com lista por empresa, obs, contagem |
+| Obs por empresa | OutlinedTextField dentro de cada accordion; flui: UI → ViewModel Map → Repository per-bistamp |
+| Empresa completa = verde | `animateColorAsState` fundo verde + CheckCircle quando todos marcados |
+
+### Ficheiros alterados
+
+- `feature/presencas/ui/PresencasScreen.kt` — Accordion redesenhado + todas as 7 melhorias UI
+- `feature/presencas/viewmodel/PresencasViewModel.kt` — `obsPorEmpresa` StateFlow + `atualizarObsEmpresa()` + conversão empresa→bistamp no registo
+- `core/database/remote/SubFuncRepository.kt` — Parâmetro `obsPorBistamp: Map<String, String>` no `registarPresencas()`; prioridade obs empresa > obs global
+
+---
+
+## Sessão 2026-08-12 — Redesign accordion + correções BD + prevenção duplicados
+
+**Objetivo:** Redesign do ecrã de presenças com accordion por empresa, correções de tipos SQL e prevenção de duplicados.
+
+### Redesign accordion por empresa
+
+- Funcionários agrupados por empresa (NOME do SUBFUNC)
+- `AnimatedVisibility` com `expandVertically`/`shrinkVertically`
+- Seta rotativa com `animateFloatAsState`
+- `EmpresaHeader` com contador presentes/total e toggle de grupo
+
+### Correções de robustez na BD
+
+| Correção | Detalhe |
+|---|---|
+| DATA: `setString()` → `setDate()` | Coluna é datetime — tipo correto |
+| HORA: `setString()` → `setTime()` | Coluna é time — tipo correto |
+| OUSRINIS: `encserie.take(30)` | Proteção truncatura varchar(30) |
+| WHERE: `r.DATA = ?` → `DATE(r.DATA) = ?` | Comparação segura datetime→date |
+| REGSTAMP único por lote | Formato yyyyMMddHHmmss, mesmo para todo o batch |
+| DATAREG/HORAREG derivados do REGSTAMP | Sem divergência de timestamp |
+| Prevenção duplicados | `SQL_EXISTE_REG` verifica BISTAMP+DATA antes de INSERT |
+
+### Ficheiros alterados
+
+- `core/database/remote/SubFuncRepository.kt` — Todas as correções SQL + REGSTAMP + duplicados + `consultarPresencas` com REGSTAMP/DATAREG/HORAREG
+- `core/relatorios/model/RelatorioPresencas.kt` — Campos `regstamp`, `dataReg`, `horaReg` em LinhaPresencaReg
+- `feature/presencas/ui/PresencasScreen.kt` — Accordion por empresa com AnimatedVisibility
+
+---
+
+## Sessão 2026-08-11 — Presenças Fase 2 + Relatórios + UX alto impacto
+
+**Objetivo:** Sistema completo de marcação de presenças por centro de custo, consulta nos relatórios, e melhorias UX de alto impacto.
+
+### 1. Presenças Fase 2 (SUBFUNC + SUBFUNC_REG)
+
+Leitura de funcionários da tabela SUBFUNC do MariaDB → cache em Room → escrita de registos no SUBFUNC_REG.
+
+**Ficheiros criados:**
+- `core/model/Funcionario.kt` — Modelo de domínio
+- `core/database/entity/SubFuncEntity.kt` — Entity Room (cache SUBFUNC)
+- `core/database/dao/SubFuncDao.kt` — DAO Room por CC
+- `core/database/remote/SubFuncRepository.kt` — Repositório JDBC (leitura SUBFUNC + escrita SUBFUNC_REG)
+
+**Ficheiros alterados:**
+- `core/database/AppDatabase.kt` — SubFuncEntity + SubFuncDao, version 5→6
+- `core/database/Migrations.kt` — MIGRATION_5_6 (CREATE TABLE subfunc)
+- `di/DatabaseModule.kt` — provideSubFuncDao + MIGRATION_5_6
+- `feature/presencas/viewmodel/PresencasViewModel.kt` — AndroidViewModel com carregamento funcionários, seleção, registo
+- `feature/presencas/ui/PresencasScreen.kt` — Lista com checkboxes, selecionar todos/nenhum, observações, registar
+
+### 2. Consulta presenças nos Relatórios
+
+- `SubFuncRepository.consultarPresencas()` — JDBC com LEFT JOIN SUBFUNC
+- `RelatorioPresencas.kt` — Modelos `RelatorioPresencasReg` e `LinhaPresencaReg`
+- `RelatoriosViewModel.kt` — Injeção SubFuncRepository + FrefRepository, filtro por CC
+- `RelatoriosScreen.kt` — `PainelPresencasReg` com dropdown filtro CC
+- `RelatorioExporter.kt` — PDF e CSV de presenças registadas
+
+### 3. Dashboard — card presenças hoje
+
+- `HomeViewModel.kt` — `carregarPresencasHoje()` via JDBC, `ultimaSync` StateFlow
+- `HomeScreen.kt` — 3º card "Presenças" no resumo do dia, timestamp sync no header
+- `AppPreferences.kt` — `ultimaSyncTimestamp`
+
+### 4. Alertas e lembretes locais (WorkManager)
+
+- `LembreteWorker.kt` — @HiltWorker, verifica presenças não registadas + talões pendentes
+- `LembreteScheduler.kt` — Periódico 4h, requer rede
+- `ControleObrasApplication.kt` — Configuration.Provider + canal notificação
+- `AndroidManifest.xml` — POST_NOTIFICATIONS + desativação WorkManagerInitializer
+- `TalaoDao.kt` — `contarPorData()` para o Worker
+
+### 5. Presenças com swipe e agrupamento
+
+- `PresencasScreen.kt` — Agrupamento por `designacao`, `stickyHeader`, `SwipeToDismissBox`
+
+### Dependências adicionadas
+
+- `work-runtime-ktx:2.10.1`, `hilt-work:1.3.0`, `hilt-compiler` (androidx)
+
+---
+
+## Sessão 2026-07-28 (7ª parte) — Auditoria funcional pós-segurança
+
+**Objetivo:** Verificação profunda de que as 11 correções de segurança não comprometem o funcionamento da aplicação. Correção de 2 problemas funcionais encontrados.
+
+### Problemas funcionais identificados e corrigidos
+
+1. **[CRÍTICO] Migração de AppPreferences — perda de dados evitada**
+   - **Problema:** A mudança do nome do ficheiro de `controle_obras_prefs` para `controle_obras_prefs_enc` causaria perda de dados dos utilizadores existentes ao atualizar a app (`jaViuBoasVindas`, `driveFolderUri`, `llmDownloadId`, `ultimaFaturaFeedback`).
+   - **Correção:** Adicionada função `migrarPrefsAntigas()` que deteta o ficheiro antigo, copia todos os valores para as novas prefs encriptadas, limpa e elimina o ficheiro antigo. Executa uma única vez (idempotente). Se falhar, os dados antigos mantêm-se intactos.
+   - **Ficheiro:** `core/common/AppPreferences.kt`
+
+2. **[MÉDIO] Regras de backup não cobriam novo ficheiro de prefs**
+   - **Problema:** `backup_rules.xml` e `data_extraction_rules.xml` excluíam apenas `controle_obras_prefs.xml` (nome antigo). O novo ficheiro `controle_obras_prefs_enc.xml` não estava excluído e poderia ser incluído em backups.
+   - **Correção:** Adicionada exclusão de `controle_obras_prefs_enc.xml` em ambos os ficheiros XML. Mantida a exclusão do ficheiro antigo para o período de migração.
+   - **Ficheiros:** `app/src/main/res/xml/backup_rules.xml`, `app/src/main/res/xml/data_extraction_rules.xml`
+
+### Verificações funcionais realizadas (sem problemas)
+
+| Alteração | Verificação | Resultado |
+|-----------|------------|-----------|
+| JDBC SSL (`useSSL=true&trustServerCertificate=true`) | Verificado que `trustServerCertificate=true` aceita certificados self-signed; MariaDB 10.x+ ativa SSL por defeito; conector 2.7.14 suporta estes parâmetros | **SEGURO** — não quebra ligações existentes |
+| `usesCleartextTraffic="false"` | Verificado grep: zero uso de `HttpURLConnection`, `OkHttp`, `Retrofit` ou URLs `http://` no código. JDBC usa sockets nativos Java (não afetado pela flag Android). ML Kit e MediaPipe operam localmente | **SEGURO** — sem impacto na rede |
+| R8 keep rules | Verificado cobertura: MariaDB JDBC (`Class.forName`), Room entities/DAOs/converters, Hilt, kotlinx.serialization, ML Kit, MediaPipe, model classes, AppConfig. Compose tratado pelo plugin. EncryptedSharedPreferences não usa reflexão | **SEGURO** — cobertura completa |
+| MariaDB 2.7.14 | Verificado: `Class.forName("org.mariadb.jdbc.Driver")` mantém-se na 2.x, API JDBC standard, `PreparedStatement`/`ResultSet` inalterados. Upgrade dentro do major version (sem breaking changes) | **SEGURO** — compatível |
+| Remoção `READ_PHONE_STATE` | Verificado: `DeviceInfo.kt` usa `Settings.Secure.ANDROID_ID` (sem permissão). Único vestígio é comentário em `WorkerFormScreen.kt`. Nenhum outro código referencia esta permissão | **SEGURO** — sem dependência |
+| Chave AES ofuscada (XOR 0x5A) | Verificado: desobfuscação em runtime via `CHAVE_AES get()` produz chave original de 32 bytes. `desencriptar()` chama `CHAVE_AES` que executa o XOR. R8 não remove arrays runtime | **SEGURO** — desencriptação funcional |
+| Logs sanitizados | Verificado: mensagens genéricas mantêm informação suficiente para debug (`"Ligação estabelecida com sucesso"`, `"Falha na ligação JDBC: [SimpleName]"`, `"Config carregada com sucesso"`) sem expor dados sensíveis | **SEGURO** — debug possível |
+
+### Ficheiros alterados
+
+- `core/common/AppPreferences.kt` — Adicionada migração automática de prefs antigas
+- `app/src/main/res/xml/backup_rules.xml` — Adicionada exclusão do novo ficheiro de prefs encriptadas
+- `app/src/main/res/xml/data_extraction_rules.xml` — Adicionada exclusão do novo ficheiro de prefs encriptadas (cloud-backup e device-transfer)
+
+---
+
+## Sessão 2026-07-28 (6ª parte) — Auditoria de segurança + correções
+
+**Objetivo:** Auditoria profunda de cibersegurança e correção de todas as vulnerabilidades identificadas.
+
+### Vulnerabilidades corrigidas
+
+1. **[CRÍTICA] C1/C2 — Chave AES ofuscada** — A chave hardcoded em `ConfigManager.kt` foi substituída por bytes ofuscados com máscara XOR (0x5A). A chave já não aparece como string legível no APK descompilado. IV fixo mantido por compatibilidade C# mas documentado.
+
+2. **[CRÍTICA] C3 — Logs de credenciais removidos** — `RemoteDatabaseManager.kt` e `FrefRepository.kt` já não registam IP, porta, BD, username ou stack traces completas no Logcat. Apenas mensagens genéricas de sucesso/falha.
+
+3. **[ALTA] H2 — SSL ativado na ligação JDBC** — URL JDBC agora inclui `?useSSL=true&trustServerCertificate=true`. Tráfego entre app e MariaDB passa a ser encriptado.
+
+4. **[ALTA] H2b — Tráfego cleartext desativado** — `android:usesCleartextTraffic` alterado de `true` para `false` no AndroidManifest.
+
+5. **[ALTA] H3 — Backup ADB desativado** — `android:allowBackup` alterado para `false`. Regras de exclusão configuradas em `backup_rules.xml` e `data_extraction_rules.xml` (BD Room, SharedPrefs, imagens de faturas).
+
+6. **[ALTA] H4 — R8/ProGuard ativado** — `optimization { enable = true }` no build.gradle.kts. Keep rules adicionadas para MariaDB JDBC, Room entities/DAOs, Hilt, kotlinx.serialization, ML Kit e MediaPipe.
+
+7. **[MÉDIA] M1 — EncryptedSharedPreferences** — `AppPreferences.kt` migrado para `EncryptedSharedPreferences` com `MasterKey` AES-256-GCM via Android Keystore. Fallback para prefs simples se Keystore falhar.
+
+8. **[MÉDIA] M3 — READ_PHONE_STATE removido** — Permissão removida do AndroidManifest e pedido removido de `WorkerFormScreen.kt`. `DeviceInfo.kt` já usava `ANDROID_ID` (não necessita permissão).
+
+9. **[MÉDIA] M4 — Log de config sanitizado** — `ConfigManager.kt` já não regista nome da empresa nem modo online nos logs.
+
+10. **[BAIXA] L2 — Limpeza automática de cache** — `RelatorioExporter.kt` agora limpa ficheiros de relatório com mais de 1 hora do `cacheDir` após cada exportação.
+
+### Ficheiros alterados
+
+- `core/config/ConfigManager.kt` — Chave AES ofuscada com XOR, log sanitizado
+- `core/database/remote/RemoteDatabaseManager.kt` — Logs limpos, SSL no JDBC
+- `core/database/remote/FrefRepository.kt` — Log de erro sanitizado
+- `core/common/AppPreferences.kt` — Migrado para EncryptedSharedPreferences
+- `core/relatorios/export/RelatorioExporter.kt` — Limpeza automática de cache
+- `feature/workerform/ui/WorkerFormScreen.kt` — Pedido READ_PHONE_STATE removido
+- `app/src/main/AndroidManifest.xml` — allowBackup=false, usesCleartextTraffic=false, READ_PHONE_STATE removido
+- `app/src/main/res/xml/backup_rules.xml` — Regras de exclusão configuradas
+- `app/src/main/res/xml/data_extraction_rules.xml` — Regras de exclusão configuradas
+- `app/build.gradle.kts` — R8 ativado, dependência security-crypto adicionada
+- `app/src/main/keepRules/rules.keep` — Keep rules para JDBC, Room, Hilt, serialization, ML Kit
+- `gradle/libs.versions.toml` — Adicionada versão e dependência security-crypto
+
+11. **[BAIXA] L3 — MariaDB connector atualizado** — Versão 1.8.0 → 2.7.14 (última da série 2.x, Jun 2026). Mesma API, sem breaking changes, corrige vulnerabilidades conhecidas e melhora suporte SSL/TLS.
+
+### Vulnerabilidades não corrigidas (requerem planeamento)
+
+- **M2 — SQLCipher para Room** — Requer migração de BD existente; risco de perda de dados em dispositivos em uso. Planear para versão futura.
+- **H1 — Camada API REST** — Mudança arquitetural grande (substituir JDBC direto). Planear com equipa backend.
+- **L1 — CharArray para password** — Requer refactor de AppConfig e todos os consumidores. Baixo impacto prático.
+
+---
+
+## Sessão 2026-07-23 (5ª parte) — Home mais completa: resumo período + faturas recentes + serviços discretos
+
+**Objetivo:** Tornar o ecrã Home mais informativo com resumo semanal/mensal, lista de faturas recentes, e serviços colapsáveis.
+
+### Novas funcionalidades
+
+1. **Cards resumo sempre visíveis** — Os cards "Talões" e "Despesas" do dia agora aparecem sempre (mesmo com 0), em vez de ficarem escondidos até haver dados.
+
+2. **Resumo semanal/mensal** — Novos cards "Últimos 7 dias" e "Este mês" com totais agregados. Calculados a partir do `observarResumoPorDia` existente (sem novas queries).
+
+3. **Últimas faturas** — Mini-lista com as 5 faturas mais recentes (empresa, data, valor). Nova query `observarUltimos(limite)` no TalaoDao.
+
+4. **Serviços colapsáveis** — Secção "Serviços" agora começa fechada com indicadores resumidos (pontos coloridos Drive/IA). Clicável para expandir com animação.
+
+### Ficheiros alterados
+
+- `core/database/dao/TalaoDao.kt` — Nova query `observarUltimos(limite: Int)`
+- `feature/home/viewmodel/HomeViewModel.kt` — Novos tipos `ResumoPeriodo` e `FaturaRecente`, novos states e observação
+- `feature/home/ui/HomeScreen.kt` — Novos composables `SecaoResumoPeriodo`, `CardPeriodo`, `SecaoUltimasFaturas`, secção serviços colapsável
+
+---
+
+## Sessão 2026-07-23 (4ª parte) — Redesign UI do ecrã principal
+
+**Objetivo:** Modernizar o layout do HomeScreen inspirado em dashboards financeiros premium. Apenas alterações visuais/layout — zero alterações de funcionalidade.
+
+### Alterações de layout
+
+1. **Header redesenhado** — Saudação contextual ("Bom dia"/"Boa tarde"/"Boa noite") com data formatada em português. Logo + nome da app na linha superior com chip BD. Gradiente subtil de fundo em vez de linha laranja na base.
+
+2. **Cards de resumo lado a lado** — `CardResumoDia` substituído por `SecaoResumoDia` com 2 cards independentes (Talões + Despesas). Números grandes (`headlineSmall`), ícones com fundo arredondado, card de despesas com destaque visual (glow laranja).
+
+3. **Botão Scan redesenhado** — Cantos 16dp, gradiente horizontal subtil, borda laranja semitransparente. Ícone de câmara com fundo laranja arredondado (14dp). Seta com fundo arredondado. Tipografia `titleMedium` para maior destaque.
+
+4. **Botão Histórico simplificado** — Fundo sólido `IndustrialSurface2`, cantos 16dp, ícone com fundo neutro, tipografia `titleSmall`. Design mais discreto que o Scan.
+
+5. **Serviços como cards individuais** — Cada serviço (Drive + IA) em card independente com cantos 16dp. Botões de ação com fundo `IndustrialGlowDim` em vez de `TextButton`. Barra de progresso com 4dp de altura e cantos arredondados.
+
+6. **Banner de feedback** — Agora com cantos 14dp, borda verde subtil, margem lateral. Ícone com fundo arredondado.
+
+7. **Diálogos** — Cantos 20dp, botões com cantos 12dp.
+
+8. **Espaçamento global** — Padding horizontal 20→24dp, gaps entre secções 16→20dp.
+
+### Ficheiros alterados
+
+- `feature/home/ui/HomeScreen.kt` — Layout completo redesenhado
+- `core/designsystem/components/IndustrialComponents.kt` — Raios dos cards 8→16dp, stat chips 8→14dp
+
+### Compatibilidade
+
+- Zero alterações em ViewModels, Models, Navigation, DAOs ou lógica de negócio
+- Todos os estados observáveis mantidos inalterados
+- Callbacks (`onNovoTalao`, `onHistorico`) inalterados
+
+---
+
+## Sessão 2026-07-23 (3ª parte) — Polimento UX: proteção, animações, zoom e splash
+
+**Objetivo:** Implementar 4 melhorias UX puramente frontend: proteção contra perda de dados, animações de transição, pinch-to-zoom nas imagens e splash screen nativo.
+
+### Novas funcionalidades
+
+1. **BackHandler nos ecrãs críticos** — `ReceiptReviewScreen` e `WorkerFormScreen` agora intercetam o botão Voltar do Android (hardware e gesto swipe-back). Mostra diálogo "Descartar alterações?" com botões "Descartar" (vermelho) e "Continuar a editar/preencher". No `WorkerFormScreen`, se o formulário estiver vazio, volta diretamente sem perguntar. Parâmetro `onVoltar` adicionado a ambos os ecrãs.
+
+2. **Animações de transição** — Banner de feedback no Home com `AnimatedVisibility` (slide+fade). Card resumo do dia com `AnimatedVisibility` (expand+fade). Texto OCR colapsável no `ReceiptDetailScreen` com `AnimatedVisibility` (expand+fade). Navegação global no `NavHost` com transições slide horizontal (25% offset) + fade (300ms) para enter/exit/popEnter/popExit.
+
+3. **Pinch-to-zoom nas imagens de faturas** — Novo componente reutilizável `FullscreenImageViewer` em `core/designsystem/components/`. Toque na imagem abre fullscreen com fundo escuro, pinch-to-zoom (1x–5x), pan/arrastar, duplo toque para repor zoom, botão fechar. Indicador "Toque para ampliar" no canto da imagem. Implementado em `ReceiptDetailScreen` e `ReceiptReviewScreen`.
+
+4. **Splash screen nativo** — API `SplashScreen` do Android 12+ via `androidx.core:core-splashscreen:1.0.1`. Fundo `IndustrialDeep` (#0F1419) + ícone `ic_logo`. Tema `Theme.ControleObras.Splash` no `themes.xml`. `installSplashScreen()` no `MainActivity.onCreate()` antes de `super.onCreate()`.
+
+### Ficheiros alterados
+
+- `core/designsystem/components/FullscreenImageViewer.kt` — **NOVO** — visualizador fullscreen com zoom
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt` — BackHandler + diálogo descartar + pinch-to-zoom na imagem
+- `feature/workerform/ui/WorkerFormScreen.kt` — BackHandler + diálogo descartar
+- `feature/home/ui/HomeScreen.kt` — AnimatedVisibility no banner e card resumo
+- `feature/receiptdetail/ui/ReceiptDetailScreen.kt` — AnimatedVisibility no OCR + pinch-to-zoom na imagem
+- `core/navigation/ControleObrasNavHost.kt` — transições globais slide+fade + passagem de onVoltar
+- `MainActivity.kt` — installSplashScreen()
+- `res/values/themes.xml` — Theme.ControleObras.Splash
+- `AndroidManifest.xml` — tema splash na Activity
+- `gradle/libs.versions.toml` — splashscreen 1.0.1
+- `app/build.gradle.kts` — dependência core-splashscreen
+
+---
+
+## Sessão 2026-07-23 (2ª parte) — Melhorias UX para uso diário em obra
+
+**Objetivo:** Implementar 3 melhorias de usabilidade identificadas na análise UX: feedback sensorial, resumo do dia e pesquisa/filtros na lista de faturas.
+
+### Novas funcionalidades
+
+1. **Feedback háptico e sonoro ao guardar talão** — Vibração curta (80ms) + bip sonoro (120ms) quando um talão é guardado com sucesso. Útil em obra com barulho/luvas. Novo ficheiro: `core/common/FeedbackUtil.kt`. Chamado no `ReceiptReviewScreen` via `LaunchedEffect(savedTalaoId)`.
+
+2. **Card resumo do dia no Home** — Mostra "Hoje: X talões · Y €" no ecrã principal. Atualiza em tempo real via Flow do Room (`observarResumoPorDia()`). Só aparece quando há pelo menos 1 talão registado no dia. `HomeViewModel` agora injeta `TalaoDao`.
+
+3. **Pesquisa e filtros na lista de faturas** — Barra de pesquisa (empresa, NIF, nº fatura, observações, nome do CC). Filtro por data (DatePicker M3). Filtro por centro de custo (FilterChips dinâmicos). Chip "Limpar tudo" quando há filtros ativos. Estado vazio diferenciado (sem dados vs. sem resultados). Card do talão agora mostra o nome do centro de custo.
+
+### Ficheiros alterados
+
+- `core/common/FeedbackUtil.kt` — **NOVO** — utilitário de vibração e som
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt` — chamada ao FeedbackUtil no save
+- `feature/home/viewmodel/HomeViewModel.kt` — injeção TalaoDao, ResumoDia, observarResumoDia()
+- `feature/home/ui/HomeScreen.kt` — CardResumoDia composable + collect resumoDia
+- `feature/receiptlist/viewmodel/ReceiptListViewModel.kt` — **REESCRITO** — pesquisa + filtros combine()
+- `feature/receiptlist/ui/ReceiptListScreen.kt` — **REESCRITO** — SearchBar + FilterChips + DatePicker
+
+---
+
+## Sessão 2026-07-23 — Correções de bugs, UX e comentários extensivos PT-PT
+
+**Objetivo:** Corrigir todos os problemas identificados na análise de código e UX; comentar extensivamente em português de Portugal.
+
+### Bugs corrigidos
+
+1. **Flow leak em RelatoriosViewModel.carregarDia()** — Cada clique num dia do calendário lançava um novo collector sem cancelar o anterior, causando N coroutines a escrever no mesmo estado. **Fix:** Adicionados `despesasJob` e `presencasJob` com `cancel()` antes de lançar novos.
+
+2. **Timestamp do feedback ignorado** — O banner "fatura guardada" podia aparecer com dados de sessões anteriores. **Fix:** Verificação de expiração (30s) no `verificarFeedbackFatura()`.
+
+### Código morto removido
+
+3. **`llmResultToDraft()`**, `parsarDataLlm()`, `parsarHoraLlm()`, `LlmItemResult.toItemTalaoDraft()` — Funções privadas no `ReceiptFlowViewModel` que nunca eram chamadas. Imports órfãos (`LlmExtractionResult`, `LlmItemResult`, `LocalTime`, `DateTimeFormatter`) também removidos.
+
+4. **KDoc duplicado** — Duas doc-blocks seguidas antes de `definirDadosManuaisEGuardar()` fundidas numa só.
+
+### Segurança / Estabilidade
+
+5. **`android.os.Process.killProcess()` removido** — Substituído por `activity?.finish()` que permite cleanup correto do Android. Adicionado **diálogo de confirmação** quando o utilizador carrega em SAIR no ecrã Home.
+
+### UX melhorado
+
+6. **Observações tornado campo opcional** — Antes bloqueava o formulário se vazio. Agora só valida o formato se preenchido.
+
+7. **Estado vazio do ReceiptListScreen** — Adicionado botão "Digitalizar primeiro talão" com ícone de câmara, evitando que o utilizador fique sem saber o que fazer.
+
+8. **Diálogo NIF manual** — Texto explicativo melhorado para esclarecer o porquê do diálogo (fatura sem QR code AT, dados OCR menos fiáveis).
+
+### Corner radii uniformizados
+
+9. Corrigidos os últimos raios inconsistentes: `ServicoItem` 10dp→8dp, botão SCAN central 14dp→8dp, ReceiptList empty state 16dp→8dp, logo no Rail 12dp→8dp.
+
+### Comentários em PT-PT
+
+10. Comentários extensivos adicionados a todos os ficheiros principais: `RelatoriosViewModel`, `HomeViewModel`, `HomeScreen`, `ReceiptFlowViewModel`, `ControleObrasNavHost`, `TalaoEntity`, `TalaoDao`, `ReceiptListScreen`.
+
+### Ficheiros alterados
+
+- `feature/relatorios/viewmodel/RelatoriosViewModel.kt` — Flow leak fix + comentários completos
+- `feature/home/viewmodel/HomeViewModel.kt` — Timestamp fix + comentários completos
+- `feature/home/ui/HomeScreen.kt` — Corner fix + KDoc + comentários
+- `feature/receiptflow/viewmodel/ReceiptFlowViewModel.kt` — Dead code removal + KDoc fix + comentários
+- `feature/receiptlist/ui/ReceiptListScreen.kt` — Botão empty state + corner fix + KDoc
+- `feature/workerform/ui/WorkerFormScreen.kt` — Observações opcional
+- `feature/receiptreview/ui/ReceiptReviewScreen.kt` — Texto NIF dialog melhorado
+- `core/navigation/ControleObrasNavHost.kt` — killProcess removal + diálogo SAIR + corners + comentários
+- `core/database/dao/TalaoDao.kt` — KDoc completo
+- `core/database/entity/TalaoEntity.kt` — KDoc completo em cada campo
+
+---
+
 ## Sessão 2026-07-13 (parte 3) — Polish anti-IA: refinamento profissional do design
 
 **Objetivo:** eliminar padrões visuais "cara de IA" e aproximar a app de produtos industriais profissionais (Fieldwire, Procore, apps de campo).

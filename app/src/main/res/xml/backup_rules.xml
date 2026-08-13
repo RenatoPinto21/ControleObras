@@ -1,13 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Regras de backup (API < 31).
+   allowBackup="false" no Manifest desativa backups, mas por defesa em profundidade
+   excluímos explicitamente dados sensíveis caso a flag seja alterada acidentalmente.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="database" path="controle_obras.db" />
+    <exclude domain="database" path="controle_obras.db-wal" />
+    <exclude domain="database" path="controle_obras.db-shm" />
+    <exclude domain="sharedpref" path="controle_obras_prefs.xml" />
+    <exclude domain="sharedpref" path="controle_obras_prefs_enc.xml" />
+    <exclude domain="file" path="receipts/" />
 </full-backup-content>

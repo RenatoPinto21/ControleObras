@@ -12,6 +12,8 @@ sealed class ControleObrasDestination(val route: String) {
     data object ReceiptReview : ControleObrasDestination(route = "receiptFlow/review")
     data object QrScan       : ControleObrasDestination(route = "receiptFlow/qrScan")
     data object ReceiptList : ControleObrasDestination(route = "receiptList")
+    data object Relatorios  : ControleObrasDestination(route = "relatorios")
+    data object Presencas   : ControleObrasDestination(route = "presencas")
 
     data object ReceiptDetail : ControleObrasDestination(route = "receiptDetail/{$ARG_TALAO_ID}") {
         fun buildRoute(talaoId: Long): String = "receiptDetail/$talaoId"

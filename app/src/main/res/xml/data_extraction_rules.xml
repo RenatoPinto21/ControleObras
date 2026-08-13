@@ -1,19 +1,24 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Regras de extração de dados (API 31+).
+   Exclui BD Room, SharedPreferences e imagens de faturas de cloud backup
+   e transferência de dispositivo.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="database" path="controle_obras.db" />
+        <exclude domain="database" path="controle_obras.db-wal" />
+        <exclude domain="database" path="controle_obras.db-shm" />
+        <exclude domain="sharedpref" path="controle_obras_prefs.xml" />
+        <exclude domain="sharedpref" path="controle_obras_prefs_enc.xml" />
+        <exclude domain="file" path="receipts/" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="database" path="controle_obras.db" />
+        <exclude domain="database" path="controle_obras.db-wal" />
+        <exclude domain="database" path="controle_obras.db-shm" />
+        <exclude domain="sharedpref" path="controle_obras_prefs.xml" />
+        <exclude domain="sharedpref" path="controle_obras_prefs_enc.xml" />
+        <exclude domain="file" path="receipts/" />
     </device-transfer>
-    -->
 </data-extraction-rules>

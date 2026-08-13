@@ -49,5 +49,11 @@ data class Talao(
     val criadoEm: Instant = Instant.now(),
 
     /** Texto bruto do OCR — nunca se perde, mesmo quando o parser falha. */
-    val textoOcr: String? = null
+    val textoOcr: String? = null,
+
+    // Dados do funcionário — preenchidos no WorkerFormScreen antes da captura
+    val funcn: String = "",
+    val fref: String = "",
+    val nmfref: String = "",
+    val agnome: String = ""
 )

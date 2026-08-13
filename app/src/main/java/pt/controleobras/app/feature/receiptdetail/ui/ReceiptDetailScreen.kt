@@ -4,6 +4,12 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -231,7 +237,7 @@ fun ReceiptDetailScreen(
                                 containerColor = IndustrialGlow,
                                 contentColor   = Color.White
                             ),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Icon(Icons.Default.IosShare, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
@@ -240,7 +246,7 @@ fun ReceiptDetailScreen(
                         OutlinedButton(
                             modifier = Modifier.weight(1f),
                             onClick  = { partilharExportacao(context, talaoAtual.id, "csv") },
-                            shape    = RoundedCornerShape(10.dp),
+                            shape    = RoundedCornerShape(8.dp),
                             border   = androidx.compose.foundation.BorderStroke(1.5.dp, IndustrialBorder)
                         ) {
                             Icon(Icons.Default.IosShare, null, modifier = Modifier.size(16.dp), tint = IndustrialSteel)
@@ -255,7 +261,7 @@ fun ReceiptDetailScreen(
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick  = { mostrarTextoOcr = !mostrarTextoOcr },
-                        shape    = RoundedCornerShape(10.dp),
+                        shape    = RoundedCornerShape(8.dp),
                         border   = androidx.compose.foundation.BorderStroke(1.dp, IndustrialBorder)
                     ) {
                         Icon(
@@ -270,7 +276,11 @@ fun ReceiptDetailScreen(
                             color = IndustrialSteel
                         )
                     }
-                    if (mostrarTextoOcr) {
+                    AnimatedVisibility(
+                        visible = mostrarTextoOcr,
+                        enter   = expandVertically() + fadeIn(),
+                        exit    = shrinkVertically() + fadeOut()
+                    ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -300,6 +310,7 @@ fun ReceiptDetailScreen(
 @Composable
 private fun ImagemFatura(imagemPath: String) {
     val context = LocalContext.current
+    var mostrarFullscreen by remember { mutableStateOf(false) }
 
     val bitmap = remember(imagemPath) {
         runCatching {
@@ -312,12 +323,21 @@ private fun ImagemFatura(imagemPath: String) {
         }.getOrNull()
     }
 
+    // Visualizador fullscreen com pinch-to-zoom
+    if (mostrarFullscreen && bitmap != null) {
+        pt.controleobras.app.core.designsystem.components.FullscreenImageViewer(
+            bitmap   = bitmap,
+            onFechar = { mostrarFullscreen = false }
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 160.dp, max = 320.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(IndustrialSurface2)
+            .clickable(enabled = bitmap != null) { mostrarFullscreen = true }
             .drawBehind {
                 // Linha laranja inferior — imersão industrial
                 drawLine(
@@ -331,10 +351,27 @@ private fun ImagemFatura(imagemPath: String) {
         if (bitmap != null) {
             Image(
                 bitmap             = bitmap.asImageBitmap(),
-                contentDescription = "Imagem da fatura",
+                contentDescription = "Imagem da fatura — toque para ampliar",
                 contentScale       = ContentScale.Fit,
                 modifier           = Modifier.fillMaxSize()
             )
+            // Indicador de zoom no canto inferior direito
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        RoundedCornerShape(4.dp)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text  = "Toque para ampliar",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            }
         } else {
             Box(
                 modifier         = Modifier.fillMaxSize(),

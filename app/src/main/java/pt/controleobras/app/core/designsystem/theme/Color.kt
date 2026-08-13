@@ -43,11 +43,30 @@ val ErrorDark = Color(0xFFFF5252)
 val OnErrorDark = Color(0xFF1A0000)
 
 // ─── Tokens extra do tema industrial ────────────────────────────────────────
-// Usados diretamente nos ecrãs via IndustrialTokens
+// Camadas de superfície — do mais escuro para o mais claro
+val IndustrialDeep       = Color(0xFF0C1016)        // fundo de headers e overlays
 val IndustrialSurface    = Color(0xFF161C22)        // superfície de card/painel
 val IndustrialSurface2   = Color(0xFF1E262F)        // camada elevada
+val IndustrialSurface3   = Color(0xFF242E38)        // elevação máxima
+
+// Bordas
 val IndustrialBorder     = Color(0xFF2E3A44)        // bordas subtis
-val IndustrialGlow       = Color(0xFFFF6D00)        // laranja glow
-val IndustrialGlowDim    = Color(0x44FF6D00)        // glow transparente
-val IndustrialAccentText = Color(0xFFFFCC80)        // laranja claro para texto secundário
-val IndustrialSteel      = Color(0xFF8A9BAB)        // texto aço
+val IndustrialBorderHigh = Color(0xFF3D4E5C)        // bordas em hover/ativo
+
+// Laranja — cor de marca
+val IndustrialGlow       = Color(0xFFFF6D00)        // laranja puro da obra
+val IndustrialGlowDim    = Color(0x33FF6D00)        // glow background (20%)
+val IndustrialGlowMid    = Color(0x66FF6D00)        // glow médio (40%)
+
+// Texto
+val IndustrialAccentText = Color(0xFFFFB74D)        // laranja âmbar — texto secundário quente
+val IndustrialSteel      = Color(0xFF7A8D9B)        // texto aço (ligeiramente mais escuro)
+val IndustrialSteelLight = Color(0xFFA0B0BC)        // aço claro — subtítulos
+
+// Estados semânticos
+val IndustrialSuccess    = Color(0xFF43A047)        // verde obra
+val IndustrialSuccessDim = Color(0x2243A047)        // fundo verde
+val IndustrialWarning    = Color(0xFFFFB300)        // âmbar alerta
+val IndustrialWarningDim = Color(0x22FFB300)        // fundo âmbar
+val IndustrialDanger     = Color(0xFFEF5350)        // vermelho erro
+val IndustrialDangerDim  = Color(0x22EF5350)        // fundo erro

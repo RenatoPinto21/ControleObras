@@ -11,14 +11,12 @@ import javax.inject.Inject
  * Gera o CSV de registo de captura no formato definido pela empresa.
  *
  * Colunas (separador ';'):
- *   Macadress ; IDREG ; TIPO ; GPS ; FUNCN ; FUNCDESC ; FUNOBS ;
+ *   SERIAL ; IDREG ; TIPO ; GPS ; FUNCN ; FREF ; FUNCDESC ; ENCARREGADO ; FUNOBS ;
  *   FORNECEDOR ; NIF_FORNECEDOR ; NIF_CLIENTE ; SERIE ;
  *   DATA ; DATA_VENCIMENTO ; METODO_PAGAMENTO ;
  *   QRCODE ; TIPODOC ; TOTAL
  *
  * Uma linha por captura.
- * O ficheiro é guardado localmente em filesDir/receipts/ com o nome {fileBaseName}.csv.
- * O mesmo ficheiro é depois enviado para o Google Drive (silenciosamente, sem interação do utilizador).
  */
 class CapturaCsvExporter @Inject constructor() {
 
@@ -35,36 +33,36 @@ class CapturaCsvExporter @Inject constructor() {
         destDir.mkdirs()
         val file = File(destDir, "${metadata.fileBaseName}.csv")
 
-        // Colunas base (sempre presentes)
         val colunasBase = listOf(
-            "Macadress", "IDREG", "TIPO", "GPS", "FUNCN", "FUNCDESC", "FUNOBS",
+            "SERIAL", "IDREG", "TIPO", "GPS",
+            "FUNCN", "FREF", "FUNCDESC", "ENCARREGADO", "FUNOBS",
             "FORNECEDOR", "NIF_FORNECEDOR", "NIF_CLIENTE", "SERIE",
             "DATA", "DATA_VENCIMENTO", "METODO_PAGAMENTO",
             "QRCODE", "TIPODOC", "TOTAL"
         )
 
-        // Colunas extras — sempre presentes quando não houve QR code AT,
-        // mesmo que o utilizador não tenha preenchido os campos (ficam vazios no CSV).
-        val semQr = atQrData == null
+        val semQr        = atQrData == null
         val colunasExtras = if (semQr) listOf("MNIF", "MVALOR") else emptyList()
+        val header        = (colunasBase + colunasExtras).joinToString(";")
 
-        val header = (colunasBase + colunasExtras).joinToString(";")
-
-        // Preferência para dados do QR AT quando disponíveis (mais fiáveis)
-        val data     = atQrData?.data?.toString()            ?: draft.data?.toString() ?: ""
-        val tipoDoc  = atQrData?.tipoDocumento               ?: ""
+        val data     = atQrData?.data?.toString()         ?: draft.data?.toString() ?: ""
+        val tipoDoc  = atQrData?.tipoDocumento            ?: ""
         val totalStr = atQrData?.totalComIva?.toString()
                        ?: draft.total?.toString()
                        ?: ""
         val qrRaw    = metadata.qrCodeRaw?.replace(";", ",") ?: ""
 
+        val cc = workerData.centroCusto
+
         val valoresBase = listOf(
-            metadata.macAddress,
+            metadata.serialDispositivo,
             metadata.idReg,
             tipo,
             metadata.gps,
             workerData.funcn,
-            workerData.ccnome,
+            cc?.fref.orEmpty(),
+            cc?.nmfref.orEmpty(),
+            cc?.agnome.orEmpty(),
             workerData.funobs,
             draft.empresa.sanitizar(),
             draft.nif,
@@ -86,11 +84,9 @@ class CapturaCsvExporter @Inject constructor() {
         } else emptyList()
 
         val linha = (valoresBase + valoresExtras).joinToString(";")
-
         file.writeText("$header\n$linha", Charsets.UTF_8)
         return file
     }
 
-    /** Remove ';' dos valores de texto para não quebrar o CSV. */
     private fun String.sanitizar() = this.replace(";", ",")
 }

@@ -7,21 +7,25 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import pt.controleobras.app.core.device.DeviceInfo
 import pt.controleobras.app.core.drive.DriveUploader
 import pt.controleobras.app.core.export.CapturaCsvExporter
 import pt.controleobras.app.core.extractor.PositionAwareReceiptExtractor
-import pt.controleobras.app.core.llm.LlmExtractionResult
+// import removido: LlmExtractionResult já não é usado (código morto eliminado)
 import pt.controleobras.app.core.llm.LlmExtractor
-import pt.controleobras.app.core.llm.LlmItemResult
+// import removido: LlmItemResult já não é usado (código morto eliminado)
 import pt.controleobras.app.core.location.LocationProvider
 import pt.controleobras.app.core.model.CaptureMetadata
 import pt.controleobras.app.core.model.ItemTalaoDraft
 import pt.controleobras.app.core.model.TalaoDraft
+import pt.controleobras.app.core.database.remote.FrefRepository
+import pt.controleobras.app.core.model.CentroCusto
 import pt.controleobras.app.core.model.WorkerFormData
 import pt.controleobras.app.core.model.paraDominio
 import pt.controleobras.app.core.ocr.TextRecognizer
@@ -34,8 +38,7 @@ import pt.controleobras.app.core.validation.InvoiceFieldValidator
 import pt.controleobras.app.data.repository.TalaoRepository
 import java.io.File
 import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
+// imports removidos: LocalTime e DateTimeFormatter já não são usados após remoção do código morto
 import javax.inject.Inject
 
 /**
@@ -60,21 +63,46 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class ReceiptFlowViewModel @Inject constructor(
+    /** ML Kit Text Recognition — converte a imagem da fatura em texto estruturado. */
     private val textRecognizer: TextRecognizer,
+    /** ML Kit Barcode Scanner — lê QR codes da imagem (ex: QR code AT). */
     private val qrCodeReader: QrCodeReader,
+    /** Parser heurístico (fallback) — extrai campos usando regex sobre texto plano. */
     private val receiptParser: ReceiptParser,
+    /** Interpreta o conteúdo específico do QR code AT (Portaria 195/2020). */
     private val atQrCodeParser: AtQrCodeParser,
+    /** Extrator baseado em modelo de IA local (Gemma) — atualmente não é o caminho principal. */
     private val llmExtractor: LlmExtractor,
+    /** Extrator posicional (primário) — usa a posição visual dos elementos na fatura. */
     private val positionExtractor: PositionAwareReceiptExtractor,
+    /** Valida cada campo extraído (NIF, datas, valores) e atribui níveis de confiança. */
     private val invoiceValidator: InvoiceFieldValidator,
+    /** Obtém coordenadas GPS do dispositivo (para geolocalizar a fatura). */
     private val locationProvider: LocationProvider,
+    /** Obtém informação do dispositivo (número de série, geração de IDs únicos). */
     private val deviceInfo: DeviceInfo,
+    /** Gera o ficheiro CSV de registo da captura (formato exigido pela empresa). */
     private val capturaCsvExporter: CapturaCsvExporter,
+    /** Faz upload de ficheiros para a pasta Google Drive configurada. */
     private val driveUploader: DriveUploader,
+    /** Repositório que gere a persistência de talões na base de dados Room local. */
     private val talaoRepository: TalaoRepository,
-    private val appPreferences: AppPreferences
+    /** Preferências partilhadas da app (último feedback, download ID, etc.). */
+    private val appPreferences: AppPreferences,
+    /** Repositório de centros de custo sincronizados com MariaDB. */
+    private val frefRepository: FrefRepository
 ) : ViewModel() {
 
+    /**
+     * Lista de centros de custo (obras) da cache local (Room).
+     * Preenchida após sincronização com o servidor MariaDB.
+     * WhileSubscribed(5s) mantém o Flow ativo 5 segundos após o último observador
+     * para evitar re-consultas desnecessárias à BD quando o utilizador roda o ecrã.
+     */
+    val centroCustos: StateFlow<List<CentroCusto>> = frefRepository.listarTodos()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Estado completo do fluxo de captura — observado pelos 3 ecrãs (Form, Câmara, Revisão). */
     private val _uiState = MutableStateFlow(ReceiptFlowUiState())
     val uiState: StateFlow<ReceiptFlowUiState> = _uiState.asStateFlow()
 
@@ -82,6 +110,11 @@ class ReceiptFlowViewModel @Inject constructor(
     // Formulário do funcionário
     // -----------------------------------------------------------------------
 
+    /**
+     * Guarda os dados do formulário do funcionário no estado partilhado.
+     * Chamado pelo WorkerFormScreen quando o utilizador carrega em "Continuar".
+     * Estes dados serão gravados junto com o talão na BD.
+     */
     fun definirFormulario(data: WorkerFormData) {
         _uiState.update { it.copy(workerFormData = data) }
     }
@@ -119,16 +152,16 @@ class ReceiptFlowViewModel @Inject constructor(
                 val gps        = gpsDeferred.await()
 
                 // 2. Identificadores do registo
-                val mac    = deviceInfo.getMacAddress(context)
+                val serial = deviceInfo.getSerialNumber(context)
                 val idReg  = deviceInfo.gerarIdReg()
                 val metadata = CaptureMetadata(
-                    macAddress = mac,
-                    idReg      = idReg,
-                    gps        = gps,
-                    qrCodeRaw  = qrContent
+                    serialDispositivo = serial,
+                    idReg             = idReg,
+                    gps               = gps,
+                    qrCodeRaw         = qrContent
                 )
 
-                // 3. Mover imagem para pasta definitiva {MAC}_{IDREG}.jpg
+                // 3. Mover imagem para pasta definitiva {SERIAL}_{IDREG}.jpg
                 val destDir    = File(context.filesDir, "receipts").also { it.mkdirs() }
                 val imagemFinal = File(destDir, "${metadata.fileBaseName}.jpg")
                 File(imagemPath).copyTo(imagemFinal, overwrite = true)
@@ -155,7 +188,7 @@ class ReceiptFlowViewModel @Inject constructor(
                 val csvFile = capturaCsvExporter.exportar(
                     destDir    = destDir,
                     metadata   = metadata,
-                    workerData = _uiState.value.workerFormData ?: WorkerFormData("", "", ""),
+                    workerData = _uiState.value.workerFormData ?: WorkerFormData("", null, ""),
                     atQrData   = atQrData,
                     draft      = draft
                 )
@@ -258,67 +291,13 @@ class ReceiptFlowViewModel @Inject constructor(
     }
 
     // -----------------------------------------------------------------------
-    // Conversão LlmExtractionResult → TalaoDraft
-    // -----------------------------------------------------------------------
-
-    private fun llmResultToDraft(
-        result: LlmExtractionResult,
-        imagemPath: String,
-        textoOcr: String
-    ): TalaoDraft = TalaoDraft(
-        empresa         = result.fornecedor.orEmpty(),
-        nif             = result.nifFornecedor.orEmpty(),
-        nifCliente      = result.nifCliente.orEmpty(),
-        morada          = result.morada.orEmpty(),
-        serie           = result.serie.orEmpty(),
-        numeroFatura    = result.numeroFatura.orEmpty(),
-        data            = parsarDataLlm(result.dataEmissao),
-        dataVencimento  = parsarDataLlm(result.dataVencimento),
-        hora            = parsarHoraLlm(result.hora),
-        metodoPagamento = result.metodoPagamento.orEmpty(),
-        total           = result.total?.replace(',', '.').orEmpty(),
-        iva             = result.ivaTotal?.replace(',', '.').orEmpty(),
-        itens           = result.linhas.map { it.toItemTalaoDraft() },
-        observacoes     = result.observacoes.orEmpty(),
-        imagemPath      = imagemPath,
-        textoReconhecido = textoOcr
-    )
-
-    private fun LlmItemResult.toItemTalaoDraft() = ItemTalaoDraft(
-        descricao     = descricao.orEmpty(),
-        quantidade    = quantidade.orEmpty(),
-        precoUnitario = precoUnitario?.replace(',', '.').orEmpty(),
-        desconto      = desconto?.replace(',', '.').orEmpty(),
-        taxaIva       = taxaIva.orEmpty(),
-        total         = totalLinha?.replace(',', '.').orEmpty()
-    )
-
-    private fun parsarDataLlm(valor: String?): LocalDate? {
-        valor ?: return null
-        val formatos = listOf(
-            DateTimeFormatter.ofPattern("dd/MM/yyyy"),
-            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
-            DateTimeFormatter.ofPattern("dd-MM-yyyy"),
-            DateTimeFormatter.ofPattern("dd.MM.yyyy")
-        )
-        for (fmt in formatos) {
-            runCatching { LocalDate.parse(valor.trim(), fmt) }.getOrNull()?.let { return it }
-        }
-        return null
-    }
-
-    private fun parsarHoraLlm(valor: String?): LocalTime? {
-        valor ?: return null
-        return runCatching {
-            LocalTime.parse(valor.trim(), DateTimeFormatter.ofPattern("HH:mm"))
-        }.getOrNull() ?: runCatching {
-            LocalTime.parse(valor.trim(), DateTimeFormatter.ofPattern("H:mm"))
-        }.getOrNull()
-    }
-
-    // -----------------------------------------------------------------------
     // Guardar talão
     // -----------------------------------------------------------------------
+    // NOTA: As funções llmResultToDraft(), parsarDataLlm(), parsarHoraLlm()
+    // e LlmItemResult.toItemTalaoDraft() foram removidas por serem código morto.
+    // Nenhum caminho do código as chamava — o processamento LLM usa outro fluxo.
+    // Se no futuro for necessário converter LlmExtractionResult → TalaoDraft,
+    // devem ser recriadas com testes adequados.
 
     fun atualizarDraft(transform: (TalaoDraft) -> TalaoDraft) {
         _uiState.update { estado ->
@@ -358,9 +337,17 @@ class ReceiptFlowViewModel @Inject constructor(
                 }
             }
 
+            val workerFormData = estado.workerFormData
             runCatching { draft.paraDominio() }
                 .onSuccess { talao ->
-                    val id = talaoRepository.guardar(talao)
+                    val cc = workerFormData?.centroCusto
+                    val talaoComWorker = talao.copy(
+                        funcn  = workerFormData?.funcn  ?: "",
+                        fref   = cc?.fref               ?: "",
+                        nmfref = cc?.nmfref             ?: "",
+                        agnome = cc?.agnome             ?: ""
+                    )
+                    val id = talaoRepository.guardar(talaoComWorker)
                     // Gravar feedback para mostrar no HomeScreen ao regressar
                     val empresa = talao.empresa.ifBlank { "Fatura" }
                     val total   = talao.total?.toString()?.let { "${it} €" } ?: ""
@@ -383,13 +370,9 @@ class ReceiptFlowViewModel @Inject constructor(
     // -----------------------------------------------------------------------
 
     /**
-     * Chamado quando o utilizador confirma os dados no diálogo de introdução manual.
-     * Guarda NIF e valor introduzidos no estado — serão exportados nas colunas
-     * MNIF e MVALOR do CSV aquando de [confirmarEGuardar].
-     */
-    /**
-     * Chamado quando o utilizador confirma NIF e valor no diálogo.
-     * Guarda os dados no estado e dispara imediatamente [confirmarEGuardar].
+     * Chamado quando o utilizador confirma NIF e valor no diálogo de introdução manual.
+     * Guarda os dados no estado (serão exportados como MNIF e MVALOR no CSV)
+     * e dispara imediatamente [confirmarEGuardar] para guardar o talão.
      */
     fun definirDadosManuaisEGuardar(context: Context, nif: String, valor: String) {
         _uiState.update {
@@ -404,8 +387,8 @@ class ReceiptFlowViewModel @Inject constructor(
     }
 
     /**
-     * Reabre o diálogo de dados manuais — chamado quando o utilizador tenta
-     * guardar sem ter confirmado os dados (sem QR o preenchimento é obrigatório).
+     * Reabre o diálogo de dado
+     * Reabre o diálogo de dados manuais (NIF + Valor).
      */
     fun reabrirDialogoNifManual() {
         _uiState.update { it.copy(mostrarDialogoNifManual = true) }

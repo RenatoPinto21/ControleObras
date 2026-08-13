@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Tema base da aplicação -->
     <style name="Theme.ControleObras" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+        Tema de Splash Screen — API SplashScreen (Android 12+).
+
+        Fundo: IndustrialDeep (#0F1419) — consistente com o tema industrial.
+        Ícone: ic_logo da app — apresentado no centro do ecrã durante o arranque.
+
+        Para API < 31, a biblioteca androidx.core:core-splashscreen emula
+        o mesmo comportamento (o windowBackground garante o fundo escuro).
+    -->
+    <style name="Theme.ControleObras.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0F1419</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.ControleObras</item>
+    </style>
+
 </resources>
