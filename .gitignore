@@ -14,3 +14,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+"gemma3-1b-it-int4.task" 
+"*.task" 
